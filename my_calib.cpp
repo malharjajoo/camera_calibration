@@ -16,6 +16,11 @@ const Size chessBoardDimension(6,9); //width = 6 , height = 9
 int chessBoardFlags = CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_NORMALIZE_IMAGE;
 const Scalar RED(0,0,255), GREEN(0,255,0); 
 
+
+
+bool myFunc(vector< vector<Point2f> >& imagePoints);
+
+
 // this calculates 3D board positions - hardcoded stuff
 static void calcKnownBoardCornerPositions(Size boardSize, float squareSize, vector<Point3f>& corners)
 {
@@ -103,21 +108,45 @@ void myRunCalibrationAndSave(Size imageSize, Mat& cameraMatrix, Mat& distCoeffs,
     cout << (ok ? "Calibration succeeded" : "Calibration failed")
          << ". avg re projection error = " << totalAvgErr << endl;
 
+	/*
     if (ok)
     {
 		 mySaveCameraParams(imageSize, cameraMatrix, distCoeffs, rvecs, tvecs, reprojErrs, imagePoints,totalAvgErr);
 	}
+	*/
 
 }
 
 
-
-
 int main( int argc, const char** argv )
 {
-
+	 bool calibrated =  false;
 	vector< vector<Point2f> > imagePoints;
-	Mat cameraMatrix,distCoeffs;
+
+	calibrated = myFunc(imagePoints);
+
+	if( calibrated)
+	{
+		
+		Mat cameraMatrix,distCoeffs;
+
+		myRunCalibrationAndSave(chessBoardDimension,cameraMatrix,distCoeffs,imagePoints);
+	}
+
+	else 
+	{
+		cout << "did not calibrate ..." << endl;
+	}
+
+	return 0;
+}
+
+
+
+bool myFunc(vector< vector<Point2f> >& imagePoints)
+{
+
+	
 	unsigned totalImages = 0 ;
 
 	VideoCapture vid(1);
@@ -183,19 +212,18 @@ int main( int argc, const char** argv )
 					
 				}
 				std::cout << "Current total = " << totalImages << "\n";
-				if(totalImages > 30)
+				if(totalImages > 10)
 				{	
 					vid.release();
-					myRunCalibrationAndSave(chessBoardDimension,cameraMatrix,distCoeffs,imagePoints);
-					
-					return 0;
+
+					return true;
 				}
 				break ; 
 				
 				
 			case 27:
 				vid.release();
-				return 0;	
+				return false;	
 				break ;	
 				
 		}
