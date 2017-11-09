@@ -8,6 +8,20 @@
 #include <iostream>
 #include <fstream>
 
+
+#include "/home/malhar/opencv-3.3.0/apps/interactive-calibration/rotationConverters.hpp"
+
+#include <cmath>
+
+#include <opencv2/calib3d.hpp>
+#include <opencv2/core.hpp>
+
+#define CALIB_PI 3.14159265358979323846
+#define CALIB_PI_2 1.57079632679489661923
+#define FONT_SIZE 0.5
+
+
+
 using namespace std;
 using namespace cv;
 
@@ -50,23 +64,41 @@ int chessBoardFlags = CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_NORMALIZE_IMAGE;
 const Scalar RED(0,0,255), GREEN(0,255,0); 
 vector< vector< Point2f > > left_img_points, right_img_points; //stores all corners
 Size imageSize;
-int num_images = 50 ;
+int num_images = 50;
 int wait_key_delay = 1000;
+std::vector<Mat> goodImageList; // list of "pair" of images where corners were detcted
 
 // Function prototypes
 bool load_image_points(int num_imgs) ;
 
 
 
-#include "/home/malhar/opencv-3.3.0/apps/interactive-calibration/rotationConverters.hpp"
 
-#include <cmath>
+//==================== Helper functions ===================
 
-#include <opencv2/calib3d.hpp>
-#include <opencv2/core.hpp>
 
-#define CALIB_PI 3.14159265358979323846
-#define CALIB_PI_2 1.57079632679489661923
+// cv::Mat.size() gives [ width x col ]
+void findSize(cv::Mat mat)
+{
+	cout << "Size of matrix = [" << mat.size().height << " x " << mat.size().width <<"]"  << "\n";
+    //std::cout << "Channels: " << mat.channels() << std::endl;
+}
+
+
+cv::Mat convertToMultiChannel(cv::Mat m)
+{
+	cv::Mat resMultiChannel;
+	std::vector<cv::Mat> channels;	
+
+	for(unsigned i = 0 ;i < m.size().height ; i++)
+	{
+		channels.push_back(m.row(i));
+	}
+	cv::merge(channels, resMultiChannel);
+	return resMultiChannel;
+}
+
+
 
 void myRot2Euler(const cv::Mat& src, cv::Mat& dst)
 {
@@ -126,6 +158,8 @@ static void calcKnownBoardCornerPositions(Size boardSize, float squareSize, vect
 }
 
 
+//==========================================================================
+
 // This function only loads images taken from stereo cameras.
 // In order to use it, images from both cameras must be present.
 bool load_image_points(int num_imgs) 
@@ -172,9 +206,15 @@ bool load_image_points(int num_imgs)
 				 imageSize = img1.size();		
 			}
 
-
+			
 			Mat gray1,gray2;
 			cvtColor(img1, gray1, CV_BGR2GRAY);
+			cvtColor(img2, gray2, CV_BGR2GRAY);
+	
+			// store in vector for display later.
+			goodImageList.push_back(gray1.clone());
+			goodImageList.push_back(gray2.clone());
+
 			cv::cornerSubPix(gray1, corners1, cv::Size(5, 5), cv::Size(-1, -1),
 			cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
 			cv::drawChessboardCorners(img1, chessBoardDimension, corners1, found1);
@@ -188,6 +228,8 @@ bool load_image_points(int num_imgs)
 			imagePoints1.push_back(corners1);
 			imagePoints2.push_back(corners2);
 
+			
+
 			i++;
 		}
 		
@@ -195,8 +237,15 @@ bool load_image_points(int num_imgs)
 		imshow("Right camera view", img2);
 	
         char key = (char)waitKey(wait_key_delay);
+			
+		if(key == 'q' || key == 27)
+		{
+			return false;	
+		}
 		
 	}
+	cv::destroyAllWindows();
+	vid1.release(); vid2.release();
 
 
 	// once all corners have been stored in buffer ...
@@ -225,8 +274,8 @@ void saveIntrinsicParameters(Mat cameraMatrix1,Mat cameraMatrix2,Mat distCoeffs1
 	
 	if( fs.isOpened() )
     {
-        fs << "M1" << cameraMatrix1 << "D1" << distCoeffs1 <<
-            "M2" << cameraMatrix2 << "D2" << distCoeffs2;
+        fs << "cameraMatrix1" << cameraMatrix1 << "distCoeffs1" << distCoeffs1 <<
+            "cameraMatrix1" << cameraMatrix2 << "distCoeffs2" << distCoeffs2;
         fs.release();
     }
     else
@@ -236,13 +285,16 @@ void saveIntrinsicParameters(Mat cameraMatrix1,Mat cameraMatrix2,Mat distCoeffs1
 
 }
 
-// save camera matrix and distortion coeffs.
-void saveExtrinsicParameters(Mat R,Mat T,Mat R1, Mat R2,Mat P1, Mat P2, Mat Q)
+
+
+
+// save relative camera pose, rectification transformation matrices...
+void saveExtrinsicParameters(Mat R,Mat rotVector, Mat T,Mat R1, Mat R2,Mat P1, Mat P2, Mat Q)
 {
-	FileStorage fs("extrinsics.yml", FileStorage::WRITE);
+	FileStorage fs("extrinsics.xml", FileStorage::WRITE);
     if( fs.isOpened() )
     {
-        fs << "R" << R << "T" << T << "R1" << R1 << "R2" << R2 << "P1" << P1 << "P2" << P2 << "Q" << Q;
+        fs << "R" << R << "Euler" << rotVector << "T" << T << "R1" << R1 << "R2" << R2 << "P1" << P1 << "P2" << P2 << "Q" << Q;
         fs.release();
     }
     else
@@ -255,9 +307,7 @@ void saveExtrinsicParameters(Mat R,Mat T,Mat R1, Mat R2,Mat P1, Mat P2, Mat Q)
 
 
 int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
-{
-	
-	
+{	
 	// Create object points, can use either left or right imagepoint list to resize
 	vector<vector<Point3f> > objectPoints(1);
 	calcKnownBoardCornerPositions(chessBoardDimension,calibSquareSize,objectPoints[0]);
@@ -279,9 +329,6 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 	fs1["camera_matrix"] >> cameraMatrix1 ;
 	fs1["distortion_coefficients"] >> distCoeffs1;
 
-	cout << "\n" << "camera Matrix 1 = "<< "\n" << cameraMatrix1 << "\n";
-	cout << "\n" << "distortion coefficeints 1 = "<< "\n" << distCoeffs1 << "\n";
-
 	fs1.release();  
 
 	FileStorage fs2;
@@ -297,9 +344,6 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 	
 	fs2["camera_matrix"] >> cameraMatrix2 ;
 	fs2["distortion_coefficients"] >> distCoeffs2;
-
-	cout << "\n" << "camera Matrix 1 = "<< "\n" << cameraMatrix2 << "\n";
-	cout << "\n" << "distortion coefficients 1 = "<< "\n" << distCoeffs2 << "\n";
 
 	fs2.release();  
 
@@ -317,29 +361,229 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 	cv::TermCriteria(TermCriteria::COUNT+TermCriteria::EPS, 100, 1e-5) );
 
 	cout << "stereo calibration re-projection error = " << rms << "\n" ;
-	cout << "Rotation vector, size = " << R.size() << "\n" << R << "\n" ;
+	//cout << "Rotation vector, size = " << R.size() << "\n" << R << "\n" ;
 	// convert rotation vector to euler angles ..?
 	Mat rotVector ;
 
 	// NOTE - There is a difference between Rodrigues and Euler angles.
 	myRot2Euler(R,rotVector); 
-	cout << "Euler angles with size = " << rotVector.size() << "\n" << rotVector << "\n" ;
+	//cout << "Euler angles with size = " << rotVector.size() << "\n" << rotVector << "\n" ;
 	cout << "Translation vector" << "\n" << T << "\n" ; 
 
-	// save intrinsic parameters - why before stereoRectify() ?
+	// save intrinsic parameters - why after stereoCalibrate ? Because it improves them ?
 	saveIntrinsicParameters(cameraMatrix1,cameraMatrix2,distCoeffs1,distCoeffs2);
 
 	Mat R1, R2, P1, P2, Q;
 	Rect validRoi[2];
 
+
+	// Image rectification 
     stereoRectify(cameraMatrix1, distCoeffs1,
                  cameraMatrix2, distCoeffs2,
                   imageSize, R, T, R1, R2, P1, P2, Q,
                   CALIB_ZERO_DISPARITY, 1, imageSize, &validRoi[0], &validRoi[1]);
+
+	// save intrinsic parameters - why after stereoRectify() ?
+	//saveIntrinsicParameters3(cameraMatrix1,cameraMatrix2,distCoeffs1,distCoeffs2);
+
 	
 	// save extrinsic parameters
-	saveExtrinsicParameters(R,T,R1,R2,P1,P2,Q);
+	saveExtrinsicParameters(R,rotVector,T,R1,R2,P1,P2,Q);
+
+	 // this is used later to display images side by side or one below the other.
+    bool isVerticalStereo = fabs(P2.at<double>(1, 3)) > fabs(P2.at<double>(0, 3));
+
+
+	//1) Undistort points 
+	//Precompute maps for cv::remap()
+	 Mat rmap[2][2];
+
+    initUndistortRectifyMap(cameraMatrix1, distCoeffs1, R1, P1, imageSize, CV_16SC2, rmap[0][0], rmap[0][1]);
+    initUndistortRectifyMap(cameraMatrix2, distCoeffs2, R2, P2, imageSize, CV_16SC2, rmap[1][0], rmap[1][1]);
+
+
+	Mat canvas;
+    double sf;
+    int w, h;
+    if( !isVerticalStereo )
+    {
+        sf = 600./MAX(imageSize.width, imageSize.height);
+        w = cvRound(imageSize.width*sf);
+        h = cvRound(imageSize.height*sf);
+        canvas.create(h, w*2, CV_8UC3);
+    }
+    else
+    {
+        sf = 300./MAX(imageSize.width, imageSize.height);
+        w = cvRound(imageSize.width*sf);
+        h = cvRound(imageSize.height*sf);
+        canvas.create(h*2, w, CV_8UC3);
+    }
+
+	// iterate over pair of images
+    for( int i = 0, len = goodImageList.size()/2 ; i < len ; i++ )
+    {
+        
+        Mat img1 = goodImageList[i*2];
+		Mat rect_img1, cimg1;
+
+		if( !img1.empty() )
+		{
+			// the remap function works as follows - 
+			// dest(x,y) = src()
+		    remap(img1, rect_img1, rmap[0][0], rmap[0][1], INTER_LINEAR);
+		    cvtColor(rect_img1, cimg1, COLOR_GRAY2BGR);
+		    Mat canvasPart1 = !isVerticalStereo ? canvas(Rect(0, 0, w, h)) : canvas(Rect(0, 0, w, h));
+		    resize(cimg1, canvasPart1, canvasPart1.size(), 0, 0, INTER_AREA);
 	
+		}
+		 else{ cout << "Image 1 is empty for i = !" << i << "\n"; }     
+
+		Mat img2 = goodImageList[i*2+1];
+	
+		if( !img2.empty() )
+		{
+			Mat rect_img2, cimg2;
+
+		    remap(img2, rect_img2, rmap[1][0], rmap[1][1], INTER_LINEAR);
+		    cvtColor(rect_img2, cimg2, COLOR_GRAY2BGR);
+		    Mat canvasPart2 = !isVerticalStereo ? canvas(Rect(w, 0, w, h)) : canvas(Rect(0, h, w, h));
+		
+		    resize(cimg2, canvasPart2, canvasPart2.size(), 0, 0, INTER_AREA);
+		}
+	
+		else{ cout << "Image 2 is empty ! for i =" << i <<  "\n"; }
+
+
+		// draw horizontal or vertical lines on the image
+        if( !isVerticalStereo )
+            for( int j = 0; j < canvas.rows; j += 16 )
+                line(canvas, Point(0, j), Point(canvas.cols, j), Scalar(0, 255, 0), 1, 8);
+        else
+            for( int j = 0; j < canvas.cols; j += 16 )
+                line(canvas, Point(j, 0), Point(j, canvas.rows), Scalar(0, 255, 0), 1, 8);
+        imshow("rectified", canvas);
+
+        char c = (char)waitKey();
+        if( c == 27 || c == 'q' || c == 'Q' )
+			
+            break;
+    }
+
+	cv::destroyAllWindows();
+
+//======================== Triangulation Section ===========================
+	cout << "Entered triangulation Section ..." << "\n";
+	VideoCapture vid1(1);
+	VideoCapture vid2(2);
+	
+	if(vid1.isOpened() && vid2.isOpened() )
+	{
+		for(;;)
+		{
+			Mat img1,img2;
+			vector< Point2f > corners1, corners2;
+
+			if(!vid1.read(img1) || !vid2.read(img2) )
+			{	
+				cout << "Can't read images " << "\n";
+				break;
+			}
+	
+
+			bool found1 = false, found2 = false;
+
+			found1 = cv::findChessboardCorners(img1, chessBoardDimension, corners1,
+			CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
+			found2 = cv::findChessboardCorners(img2, chessBoardDimension, corners2,
+			CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
+
+			if(found1 && found2) 
+			{
+
+				Mat gray1,gray2;
+				cvtColor(img1, gray1, CV_BGR2GRAY);
+				cvtColor(img2, gray2, CV_BGR2GRAY);
+
+				// store in vector for display later.
+				goodImageList.push_back(gray1.clone());
+				goodImageList.push_back(gray2.clone());
+
+				cv::cornerSubPix(gray1, corners1, cv::Size(5, 5), cv::Size(-1, -1),
+				cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
+				cv::drawChessboardCorners(img1, chessBoardDimension, corners1, found1);
+
+				cvtColor(img2, gray2, CV_BGR2GRAY);
+				cv::cornerSubPix(gray2, corners2, cv::Size(5, 5), cv::Size(-1, -1),
+				cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
+				cv::drawChessboardCorners(img2, chessBoardDimension, corners2, found2);
+
+				cout << "Found corners in image" << "\n";
+				
+
+				std::stringstream ss;  // used during displays
+
+
+				cout << "Now triangulating ..." << "\n";
+
+				// Let's try triangulating corners from first pair of images
+				// 2) cv::Triangulate()
+				cv::Mat pnts4D(1,corners1.size(),CV_64FC4);
+
+				cv::triangulatePoints(P1,P2,corners1,corners2,pnts4D);
+			
+				//cout << "The 4D points are = " << "\n" << pnts4D << "\n"; 
+
+				// since output of triangulation is 4XN single channel array 
+				// we convert it to a 4-channel Matrix using cv::Merge.
+				cv::Mat multiChannelMat = convertToMultiChannel(pnts4D);
+				
+				//convert output to standard (x,y,z) as we know
+				cv::Mat pnts3D(1,corners1.size(),CV_64FC3);
+				cv::convertPointsFromHomogeneous(multiChannelMat,pnts3D);
+					
+				// put (x,y,z) coordinate onto the image(s)
+				// Let's just try for 3 random corners
+				for(unsigned i=0, len = corners1.size(); i < len ; i+=15)
+				{
+					ss << "( " << pnts3D.at<double>(0,i) <<" , " << pnts3D.at<double>(1,i) << " , " << pnts3D.at<double>(2,i) <<" )" ;
+
+					cv::putText(img1,ss.str(),corners1[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(200,255,155));
+	
+					cv::putText(img2,ss.str(),corners2[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(200,255,155));
+
+					ss.str(""); //clear the stringstream buffer
+				}
+				
+			}
+	
+			else
+			{
+				cout << "No corners found!" << "\n";
+			}
+
+			imshow("Triangle - Left camera view", img1);
+			imshow("Triangle - Right camera view", img2);
+
+			char key = (char)waitKey(wait_key_delay);
+		
+			if(key == 'q' || key == 27)
+			{
+				break;
+			}
+	
+		}
+
+		vid1.release(); vid2.release();
+
+	}
+
+	else
+	{
+		cout << "Can't triangulate, Can't open video device input'...";
+	}
+
+
 } 
 
 
@@ -348,8 +592,8 @@ int main( int argc, const char** argv )
 {
 
 	
-	char* calibFile1 = "/home/malhar/opencv_work/saved_camera_params/microsoft_lifecam.xml";
-	char* calibFile2 = "/home/malhar/opencv_work/saved_camera_params/logitech_camera_params.xml";
+	char* calibFile1 = "/home/malhar/opencv_work/saved_camera_params/logitech_camera_params.xml";
+	char* calibFile2 = "/home/malhar/opencv_work/saved_camera_params/microsoft_lifecam.xml";
 
 	bool foundImagePoints =  load_image_points(num_images); 
 
