@@ -18,7 +18,7 @@
 
 #define CALIB_PI 3.14159265358979323846
 #define CALIB_PI_2 1.57079632679489661923
-#define FONT_SIZE 0.5
+#define FONT_SIZE 0.3
 
 
 
@@ -64,7 +64,7 @@ int chessBoardFlags = CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_NORMALIZE_IMAGE;
 const Scalar RED(0,0,255), GREEN(0,255,0); 
 vector< vector< Point2f > > left_img_points, right_img_points; //stores all corners
 Size imageSize;
-int num_images = 50;
+int num_images = 2;
 int wait_key_delay = 1000;
 std::vector<Mat> goodImageList; // list of "pair" of images where corners were detcted
 
@@ -100,6 +100,32 @@ cv::Mat convertToMultiChannel(cv::Mat m)
 
 
 
+cv::Mat convertPoint2fTo2ChannelMatrix(std::vector<Point2f> vec)
+{
+	cv::Mat xes(vec.size(),1,CV_64FC1);
+	cv::Mat yes(vec.size(),1,CV_64FC1);
+
+	for(unsigned i=0; i < vec.size(); ++i)
+	{
+		xes.at<double>(i,0) = vec[i].x;
+		yes.at<double>(i,0) = vec[i].y;
+	}
+	
+	std::vector<cv::Mat> channels;
+	channels.push_back(xes);
+	channels.push_back(yes);
+		
+	cv::Mat res2;
+	cv::merge(channels,res2);
+
+	return res2;
+}
+
+
+
+
+// Converts rotation to Euler angles.
+// Please note Euler angles != Rodrigues 
 void myRot2Euler(const cv::Mat& src, cv::Mat& dst)
 {
     if((src.rows == 3) && (src.cols == 3))
@@ -229,7 +255,7 @@ bool load_image_points(int num_imgs)
 			imagePoints2.push_back(corners2);
 
 			
-
+			
 			i++;
 		}
 		
@@ -275,7 +301,7 @@ void saveIntrinsicParameters(Mat cameraMatrix1,Mat cameraMatrix2,Mat distCoeffs1
 	if( fs.isOpened() )
     {
         fs << "cameraMatrix1" << cameraMatrix1 << "distCoeffs1" << distCoeffs1 <<
-            "cameraMatrix1" << cameraMatrix2 << "distCoeffs2" << distCoeffs2;
+            "cameraMatrix2" << cameraMatrix2 << "distCoeffs2" << distCoeffs2;
         fs.release();
     }
     else
@@ -394,7 +420,7 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
     bool isVerticalStereo = fabs(P2.at<double>(1, 3)) > fabs(P2.at<double>(0, 3));
 
 
-	//1) Undistort points 
+
 	//Precompute maps for cv::remap()
 	 Mat rmap[2][2];
 
@@ -482,7 +508,7 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 		for(;;)
 		{
 			Mat img1,img2;
-			vector< Point2f > corners1, corners2;
+			vector< Point2f > observedCorners1, observedCorners2, corners1, corners2;
 
 			if(!vid1.read(img1) || !vid2.read(img2) )
 			{	
@@ -493,13 +519,15 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 
 			bool found1 = false, found2 = false;
 
-			found1 = cv::findChessboardCorners(img1, chessBoardDimension, corners1,
+			found1 = cv::findChessboardCorners(img1, chessBoardDimension, observedCorners1,
 			CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
-			found2 = cv::findChessboardCorners(img2, chessBoardDimension, corners2,
+			found2 = cv::findChessboardCorners(img2, chessBoardDimension, observedCorners2,
 			CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
+
 
 			if(found1 && found2) 
 			{
+				
 
 				Mat gray1,gray2;
 				cvtColor(img1, gray1, CV_BGR2GRAY);
@@ -509,26 +537,33 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 				goodImageList.push_back(gray1.clone());
 				goodImageList.push_back(gray2.clone());
 
-				cv::cornerSubPix(gray1, corners1, cv::Size(5, 5), cv::Size(-1, -1),
+				cv::cornerSubPix(gray1, observedCorners1, cv::Size(5, 5), cv::Size(-1, -1),
 				cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
-				cv::drawChessboardCorners(img1, chessBoardDimension, corners1, found1);
+				cv::drawChessboardCorners(img1, chessBoardDimension, observedCorners1, found1);
 
 				cvtColor(img2, gray2, CV_BGR2GRAY);
-				cv::cornerSubPix(gray2, corners2, cv::Size(5, 5), cv::Size(-1, -1),
+				cv::cornerSubPix(gray2, observedCorners2, cv::Size(5, 5), cv::Size(-1, -1),
 				cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
-				cv::drawChessboardCorners(img2, chessBoardDimension, corners2, found2);
+				cv::drawChessboardCorners(img2, chessBoardDimension, observedCorners2, found2);
 
-				cout << "Found corners in image" << "\n";
+				//cout << "Found corners in image" << "\n";
 				
+	
 
 				std::stringstream ss;  // used during displays
 
 
-				cout << "Now triangulating ..." << "\n";
-
 				// Let's try triangulating corners from first pair of images
-				// 2) cv::Triangulate()
 				cv::Mat pnts4D(1,corners1.size(),CV_64FC4);
+
+	
+				
+				//convertPoint2fTo2ChannelMatrix
+				undistortPoints(observedCorners1,corners1,cameraMatrix1,distCoeffs1,R1,P1);
+				undistortPoints(observedCorners2,corners2,cameraMatrix2,distCoeffs2,R2,P2);
+
+				cout << "After undistort" << "\n";
+				
 
 				cv::triangulatePoints(P1,P2,corners1,corners2,pnts4D);
 			
@@ -548,13 +583,14 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 				{
 					ss << "( " << pnts3D.at<double>(0,i) <<" , " << pnts3D.at<double>(1,i) << " , " << pnts3D.at<double>(2,i) <<" )" ;
 
-					cv::putText(img1,ss.str(),corners1[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(200,255,155));
+					cv::putText(img1,ss.str(),observedCorners1[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(200,255,155));
 	
-					cv::putText(img2,ss.str(),corners2[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(200,255,155));
+					cv::putText(img2,ss.str(),observedCorners2[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(200,255,155));
 
 					ss.str(""); //clear the stringstream buffer
 				}
 				
+
 			}
 	
 			else
