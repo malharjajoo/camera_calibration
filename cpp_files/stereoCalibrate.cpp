@@ -18,7 +18,7 @@
 
 #define CALIB_PI 3.14159265358979323846
 #define CALIB_PI_2 1.57079632679489661923
-#define FONT_SIZE 0.3
+#define FONT_SIZE 0.5
 
 
 
@@ -64,7 +64,7 @@ int chessBoardFlags = CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_NORMALIZE_IMAGE;
 const Scalar RED(0,0,255), GREEN(0,255,0); 
 vector< vector< Point2f > > left_img_points, right_img_points; //stores all corners
 Size imageSize;
-int num_images = 2;
+int num_images = 20;
 int wait_key_delay = 1000;
 std::vector<Mat> goodImageList; // list of "pair" of images where corners were detcted
 
@@ -75,6 +75,27 @@ bool load_image_points(int num_imgs) ;
 
 
 //==================== Helper functions ===================
+
+
+// Computes P = K * [R|t]
+// K : cameraMatrix , 3x3
+// R : rotationMatrix , 3x3
+// t : translation matrix , 3x1
+cv::Mat computeProjectionMatrix(cv::Mat K,cv::Mat R,cv::Mat t)
+{
+	cv::Mat RTMat(3, 4, CV_64F);
+	cv::hconcat(R,t,RTMat);
+
+	return K*RTMat;
+}
+
+
+void printMatrixInfo(cv::Mat M)
+{
+	cout << "rows = " << M.rows << "\n";
+	cout << "cols = " << M.cols << "\n";
+	cout << "channels = " << M.channels() << "\n";
+}
 
 
 // cv::Mat.size() gives [ width x col ]
@@ -315,12 +336,21 @@ void saveIntrinsicParameters(Mat cameraMatrix1,Mat cameraMatrix2,Mat distCoeffs1
 
 
 // save relative camera pose, rectification transformation matrices...
-void saveExtrinsicParameters(Mat R,Mat rotVector, Mat T,Mat R1, Mat R2,Mat P1, Mat P2, Mat Q)
+void saveExtrinsicParameters(Mat R, Mat T,Mat R1, Mat R2,Mat P1, Mat P2, Mat Q)
 {
+	cv::Mat rotVector_R ;
+	cv::Mat rotVector_R1 ;
+	cv::Mat rotVector_R2 ;
+
+	// NOTE - There is a difference between Rodrigues and Euler angles.
+	myRot2Euler(R,rotVector_R); 	
+	myRot2Euler(R1,rotVector_R1); 
+	myRot2Euler(R2,rotVector_R2); 
+	
 	FileStorage fs("extrinsics.xml", FileStorage::WRITE);
     if( fs.isOpened() )
     {
-        fs << "R" << R << "Euler" << rotVector << "T" << T << "R1" << R1 << "R2" << R2 << "P1" << P1 << "P2" << P2 << "Q" << Q;
+        fs << "R" << R << "Euler_R" << rotVector_R << "T" << T << "R1" << R1 <<  "Euler_R1" << rotVector_R1 << "R2" << R2 << "Euler_R2" << rotVector_R2 << "P1" << P1 << "P2" << P2 << "Q" << Q;
         fs.release();
     }
     else
@@ -389,46 +419,40 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 	cout << "stereo calibration re-projection error = " << rms << "\n" ;
 	//cout << "Rotation vector, size = " << R.size() << "\n" << R << "\n" ;
 	// convert rotation vector to euler angles ..?
-	Mat rotVector ;
-
-	// NOTE - There is a difference between Rodrigues and Euler angles.
-	myRot2Euler(R,rotVector); 
-	//cout << "Euler angles with size = " << rotVector.size() << "\n" << rotVector << "\n" ;
+	
 	cout << "Translation vector" << "\n" << T << "\n" ; 
 
 	// save intrinsic parameters - why after stereoCalibrate ? Because it improves them ?
 	saveIntrinsicParameters(cameraMatrix1,cameraMatrix2,distCoeffs1,distCoeffs2);
 
-	Mat R1, R2, P1, P2, Q;
+	cv::Mat R1, R2, P1, P2, Q;
 	Rect validRoi[2];
 
 
 	// Image rectification 
-    stereoRectify(cameraMatrix1, distCoeffs1,
+    cv::stereoRectify(cameraMatrix1, distCoeffs1,
                  cameraMatrix2, distCoeffs2,
                   imageSize, R, T, R1, R2, P1, P2, Q,
                   CALIB_ZERO_DISPARITY, 1, imageSize, &validRoi[0], &validRoi[1]);
 
-	// save intrinsic parameters - why after stereoRectify() ?
-	//saveIntrinsicParameters3(cameraMatrix1,cameraMatrix2,distCoeffs1,distCoeffs2);
-
 	
 	// save extrinsic parameters
-	saveExtrinsicParameters(R,rotVector,T,R1,R2,P1,P2,Q);
+	saveExtrinsicParameters(R,T,R1,R2,P1,P2,Q);
 
 	 // this is used later to display images side by side or one below the other.
     bool isVerticalStereo = fabs(P2.at<double>(1, 3)) > fabs(P2.at<double>(0, 3));
 
 
 
-	//Precompute maps for cv::remap()
+	//compute maps for cv::remap()
 	 Mat rmap[2][2];
 
+	// we extract first 3 coloumns of P1 and P2, since they are the "new" camera matrix
     initUndistortRectifyMap(cameraMatrix1, distCoeffs1, R1, P1, imageSize, CV_16SC2, rmap[0][0], rmap[0][1]);
     initUndistortRectifyMap(cameraMatrix2, distCoeffs2, R2, P2, imageSize, CV_16SC2, rmap[1][0], rmap[1][1]);
 
 
-	Mat canvas;
+	cv::Mat canvas;
     double sf;
     int w, h;
     if( !isVerticalStereo )
@@ -448,8 +472,7 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 
 	// iterate over pair of images
     for( int i = 0, len = goodImageList.size()/2 ; i < len ; i++ )
-    {
-        
+    { 
         Mat img1 = goodImageList[i*2];
 		Mat rect_img1, cimg1;
 
@@ -499,6 +522,8 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 	cv::destroyAllWindows();
 
 //======================== Triangulation Section ===========================
+
+
 	cout << "Entered triangulation Section ..." << "\n";
 	VideoCapture vid1(1);
 	VideoCapture vid2(2);
@@ -508,11 +533,11 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 		for(;;)
 		{
 			Mat img1,img2;
-			vector< Point2f > observedCorners1, observedCorners2, corners1, corners2;
+			vector< Point2f > observedCorners1, observedCorners2, undistortedCorners1, undistortedCorners2;
 
 			if(!vid1.read(img1) || !vid2.read(img2) )
 			{	
-				cout << "Can't read images " << "\n";
+				cout << "Can't read images !!" << "\n";
 				break;
 			}
 	
@@ -527,7 +552,6 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 
 			if(found1 && found2) 
 			{
-				
 
 				Mat gray1,gray2;
 				cvtColor(img1, gray1, CV_BGR2GRAY);
@@ -546,26 +570,25 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 				cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
 				cv::drawChessboardCorners(img2, chessBoardDimension, observedCorners2, found2);
 
-				//cout << "Found corners in image" << "\n";
-				
+				//========== Undistort and triangulate ======
 	
+				//convertPoint2fTo2ChannelMatrix ?? Do I need to do this ?
+				cv::undistortPoints(observedCorners1,undistortedCorners1,cameraMatrix1,distCoeffs1,R1,P1);
+				cv::undistortPoints(observedCorners2,undistortedCorners2,cameraMatrix2,distCoeffs2,R2,P2);
 
-				std::stringstream ss;  // used during displays
+				//cout << "After undistort" << "\n";
+				//cout << "Observed corners 1 = \n" << observedCorners1 << "\n";
+				//cout << "uUndistorted corners 1 = \n" << undistortedCorners1 << "\n";
 
+				cv::Mat pnts4D(1,undistortedCorners2.size(),CV_64FC4);
 
-				// Let's try triangulating corners from first pair of images
-				cv::Mat pnts4D(1,corners1.size(),CV_64FC4);
-
-	
+				/*
+				cv::Mat projMat1,projMat2 ;
+				projMat1 = computeProjectionMatrix(cameraMatrix1,R,T);
+				projMat2 = computeProjectionMatrix(cameraMatrix2,R,T);
+				*/				
 				
-				//convertPoint2fTo2ChannelMatrix
-				undistortPoints(observedCorners1,corners1,cameraMatrix1,distCoeffs1,R1,P1);
-				undistortPoints(observedCorners2,corners2,cameraMatrix2,distCoeffs2,R2,P2);
-
-				cout << "After undistort" << "\n";
-				
-
-				cv::triangulatePoints(P1,P2,corners1,corners2,pnts4D);
+				cv::triangulatePoints(P1,P2,undistortedCorners1,undistortedCorners2,pnts4D);
 			
 				//cout << "The 4D points are = " << "\n" << pnts4D << "\n"; 
 
@@ -573,19 +596,28 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 				// we convert it to a 4-channel Matrix using cv::Merge.
 				cv::Mat multiChannelMat = convertToMultiChannel(pnts4D);
 				
-				//convert output to standard (x,y,z) as we know
-				cv::Mat pnts3D(1,corners1.size(),CV_64FC3);
+				//convert output to standard 3D (x,y,z) as we know
+				cv::Mat pnts3D(1,undistortedCorners1.size(),CV_64FC3);
 				cv::convertPointsFromHomogeneous(multiChannelMat,pnts3D);
 					
-				// put (x,y,z) coordinate onto the image(s)
-				// Let's just try for 3 random corners
-				for(unsigned i=0, len = corners1.size(); i < len ; i+=15)
-				{
-					ss << "( " << pnts3D.at<double>(0,i) <<" , " << pnts3D.at<double>(1,i) << " , " << pnts3D.at<double>(2,i) <<" )" ;
+		
+				//cout << "pnts4D = \n" << pnts4D << "\n";
+				//cout << "pnts3D = \n" << pnts3D << "\n";
 
-					cv::putText(img1,ss.str(),observedCorners1[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(200,255,155));
+				// put (x,y,z) coordinate onto the image(s)
+				// Let's just try for a few corners
+
+				std::stringstream ss;  // used during display
+				for(unsigned i=0, len = observedCorners1.size(); i < len ; i+=30)
+				{
+					ss << "( " << pnts3D.at<float>(i,0) <<" , " << pnts3D.at<float>(i,1) << " , " << pnts3D.at<float>(i,2) <<" )" ;
+
+					
+					//cout << "(x,y,z) =" << pnts3D.rowRange(i,i+1) << "\n";
+
+					cv::putText(img1,ss.str(),observedCorners1[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(0,0,255));
 	
-					cv::putText(img2,ss.str(),observedCorners2[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(200,255,155));
+					cv::putText(img2,ss.str(),observedCorners2[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, cv::Scalar(0,0,255));
 
 					ss.str(""); //clear the stringstream buffer
 				}
@@ -595,7 +627,7 @@ int RunAndSaveStereoCalibration(char* leftCalibFile, char* rightCalibFile)
 	
 			else
 			{
-				cout << "No corners found!" << "\n";
+				//cout << "No corners found!" << "\n";
 			}
 
 			imshow("Triangle - Left camera view", img1);
