@@ -1,6 +1,6 @@
 Inception Report
 =====
-Aims and Background material 
+
 
 Aim
 -------
