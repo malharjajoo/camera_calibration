@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<opencv_storage>
+<K1 type_id="opencv-matrix">
+  <rows>3</rows>
+  <cols>2</cols>
+  <dt>u</dt>
+  <data>
+    0 0 0 12 0 0</data></K1>
+<reprojError>0.</reprojError>
+</opencv_storage>

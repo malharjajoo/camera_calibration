@@ -70,11 +70,12 @@ string type2str(int type) {
 
 
 // A few globals for ease
-const float calibSquareSize = 0.02578f; //metres
+const float calibSquareSize = 0.02578f; //in metres
 const Size chessBoardDimension(6,9); //width = 6 , height = 9 
 int chessBoardFlags = CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_NORMALIZE_IMAGE;
 const cv::Scalar RED(0,0,255), GREEN(0,255,0); 
-vector< vector< Point2f > > left_img_points, right_img_points; //stores all corners
+
+std::vector< vector< Point2f > > left_img_points, right_img_points; //stores all corners
 Size imageSize;
 
 int wait_key_delay = 1000;
@@ -119,7 +120,7 @@ void printMatrixInfo(cv::Mat M)
 // but we want to display row x col
 void findSize(cv::Mat mat)
 {
-	cout << "Size of matrix (row x col )= [" << mat.size().height << " x " << mat.size().width <<"]"  << "\n";
+	std::cout << "Size of matrix (row x col )= [" << mat.size().height << " x " << mat.size().width <<"]"  << "\n";
 }
 
 
@@ -231,13 +232,21 @@ static void calcKnownBoardCornerPositions(Size boardSize, float squareSize, vect
 }
 
 
-//========================== Loading images and detecting features ===============================
+bool fexists(const char *filename)
+{
+  ifstream ifile(filename);
+  return ifile;
+}
 
-// This function only loads images taken from stereo cameras.
-// In order to use it, images from both cameras must be present.
-// Also note that the output is stored in a global vector for convenience purpse
+//========================== Loading images and detecting features(corners) ===============================
+
+// In order to use this function, images from both cameras must be present.
+// It loads images taken from stereo cameras.
+// It then detects corners in image pairs and stores the coordinates.
+// Also note that the output is stored in a global vector (for convenience)
 bool load_image_points(int num_imgs) 
 {
+  // These are temp buffers (not entirely sure why I've used these)
 	vector<vector<Point2f> > imagePoints1,imagePoints2;
 	VideoCapture vid1(1);
 	VideoCapture vid2(2);
@@ -247,8 +256,8 @@ bool load_image_points(int num_imgs)
 		return false;
 	}
 
+	std::cout << "Reading input images from video stream ...." << "\n";
 
-	cout << "Reading input images from video stream ...." << "\n";
 	// loop over each pair of left and right images.
 	for(int i=0;;)
 	{
@@ -268,12 +277,12 @@ bool load_image_points(int num_imgs)
 	
 		bool found1 = false, found2 = false;
 
-		found1 = cv::findChessboardCorners(img1, chessBoardDimension, corners1,
-		CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
-		found2 = cv::findChessboardCorners(img2, chessBoardDimension, corners2,
-		CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
+		// stores corners' coordinates in corners1/corners2 (passed by reference)
+		found1 = cv::findChessboardCorners(img1, chessBoardDimension, corners1,CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
+		found2 = cv::findChessboardCorners(img2, chessBoardDimension, corners2,CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
 
-		if (found1 && found2) 
+		// If corners are found in both images.
+		if(found1 && found2) 
 		{
 			// just do it once.
 			if(imageSize == Size())
@@ -287,39 +296,41 @@ bool load_image_points(int num_imgs)
 			cvtColor(img1, gray1, CV_BGR2GRAY);
 			cvtColor(img2, gray2, CV_BGR2GRAY);
 	
-			// store in global vector for display later. ( after rectification and undistortion process)
+			// store in global vector for display later. (after rectification and undistortion process)
 			goodGrayImageList.push_back(gray1.clone());
 			goodGrayImageList.push_back(gray2.clone());
 
-			cv::cornerSubPix(gray1, corners1, cv::Size(5, 5), cv::Size(-1, -1),
-			cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
+			// Corner sub-pixel refinement.
+			cv::cornerSubPix(gray1, corners1, cv::Size(5, 5), cv::Size(-1, -1),cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
 			cv::drawChessboardCorners(img1, chessBoardDimension, corners1, found1);
 
 			cvtColor(img2, gray2, CV_BGR2GRAY);
-			cv::cornerSubPix(gray2, corners2, cv::Size(5, 5), cv::Size(-1, -1),
-			cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
+			cv::cornerSubPix(gray2, corners2, cv::Size(5, 5), cv::Size(-1, -1),cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
 			cv::drawChessboardCorners(img2, chessBoardDimension, corners2, found2);
 
-			cout << "Found corners for i = " << i << endl;
+			std::cout << "Found corners for image pair i = " << i << endl;
 			imagePoints1.push_back(corners1);
 			imagePoints2.push_back(corners2);
 
-			
-			
+			// "i" is incremented only when corners are found in both images.
 			i++;
 		}
 		
+		// show the image pair regardless of whether corners are found.
 		imshow("Left camera view", img1);
 		imshow("Right camera view", img2);
 	
-        char key = (char)waitKey(wait_key_delay);
+    char key = (char)waitKey(wait_key_delay);
 			
+		// 27 is ascii for escape key.
 		if(key == 'q' || key == 27)
 		{
-			return false;	
+			return false;	 
 		}
 		
 	}
+
+	// Release resources.
 	cv::destroyAllWindows();
 	vid1.release(); vid2.release();
 
@@ -328,8 +339,8 @@ bool load_image_points(int num_imgs)
 	// put them into the globals 
 	for (int i = 0; i < imagePoints1.size(); i++) 
 	{
-		vector< Point2f > v1, v2;
-		for (int j = 0; j < imagePoints1[i].size(); j++) 
+		std::vector< Point2f > v1, v2;
+		for (int j = 0; j < imagePoints1[i].size(); ++j) 
 		{
 		  v1.push_back(Point2f((double)imagePoints1[i][j].x, (double)imagePoints1[i][j].y));
 		  v2.push_back(Point2f((double)imagePoints2[i][j].x, (double)imagePoints2[i][j].y));
@@ -351,17 +362,18 @@ bool load_image_points(int num_imgs)
 // save camera matrix and distortion coeffs.
 void saveIntrinsicParameters(const char* intrinsics_file, Mat cameraMatrix1,Mat cameraMatrix2,Mat distCoeffs1, Mat distCoeffs2)
 {
-    FileStorage fs(intrinsics_file, FileStorage::WRITE);
+
+  FileStorage fs(intrinsics_file, FileStorage::WRITE);
 	
 	if( fs.isOpened() )
-    {
-        fs << "cameraMatrix1" << cameraMatrix1 << "distCoeffs1" << distCoeffs1 <<
-            "cameraMatrix2" << cameraMatrix2 << "distCoeffs2" << distCoeffs2;
-        fs.release();
-    }
-    else
+  {
+      fs << "cameraMatrix1" << cameraMatrix1 << "distCoeffs1" << distCoeffs1 <<
+          "cameraMatrix2" << cameraMatrix2 << "distCoeffs2" << distCoeffs2;
+      fs.release();
+  }
+  else
 	{
-        cout << "Error: can not save the intrinsic parameters ( File cannot be opened )\n";
+      cout << "Error: can not save the intrinsic parameters ( File cannot be opened )\n";
 	}
 
 }
@@ -369,42 +381,67 @@ void saveIntrinsicParameters(const char* intrinsics_file, Mat cameraMatrix1,Mat 
 
 
 
+// file below refers to extrinsics file.
 
-// Note - Returns true if input file(extrinsics) is not having a reprojection entry field. ( In which case it will possibly be overwritten
-// by whoever is using this function.)
+/*
+	If file exists
+	Returns true if -
+	a) file can be opened but doesn't contain a reprojection error field.
+	b) file contains field and current result is better than best result so far.
+
+	Returns false if - 
+	a) file can't be opened. 
+	b) file contains field and current result is NOT better than best result so far.
+
+	If file doesnt exist, then simply return true so that it can be overwritten.
+*/
 bool betterThanPreviousReprojectionError(const char* extrinsics_file, double currentReprojectionError)
 {
 	bool betterThanPrevious = false;
 
-	FileStorage fs;
-	fs.open(extrinsics_file,FileStorage::READ);
-
-	if(fs.isOpened())
+	if(fexists(extrinsics_file))
 	{
-		FileNode n = fs["reprojError"] ;
+			FileStorage fs;
+			fs.open(extrinsics_file,FileStorage::READ);
 
-		if(n.type()!=FileNode::NONE)
-		{
-			double best_reprojError;
-			fs["reprojError"] >> best_reprojError;
-	
-				
-			if(currentReprojectionError <  best_reprojError)
+			if(fs.isOpened())
 			{
-				betterThanPrevious = true;
-			}
-				
-		}
-		// NOTE - if input file doesnt contain field, it may be overwritten by caller of this function
-		else
-		{
-			betterThanPrevious = true;
-			std::cout << "Emoty Node! (file might be overwritten)\n";
-		}
-	
-		fs.release();
-	}
+				FileNode n = fs["reprojError"] ;
 
+				if(n.type()!=FileNode::NONE)
+				{
+					double best_reprojError;
+					fs["reprojError"] >> best_reprojError;
+	
+				
+					if(currentReprojectionError <  best_reprojError)
+					{
+						betterThanPrevious = true;
+					}
+				
+				}
+				// NOTE - if input file doesnt contain field, it may be overwritten by caller of this function
+				else
+				{
+					betterThanPrevious = true;
+					std::cerr << "Empty Node! (file might be overwritten)\n";
+				}
+	
+				fs.release();
+			}
+
+			else
+			{
+				std::cerr << "File can't be opened!\n";
+			}
+
+	}
+	// if file doesnt exist, we want it to be overwritten
+	else
+	{
+		betterThanPrevious = true;
+	}
+	
 	return betterThanPrevious;
 }
 
@@ -418,15 +455,15 @@ void saveExtrinsicParameters(const char* extrinsics_file,cv::Mat R, cv::Mat T,cv
 	myRot2Euler(R,rotVector_R);  // convert to more comprehensible form	
 	
 	FileStorage fs(extrinsics_file, FileStorage::WRITE);
-	
-    if( fs.isOpened() )
-    {
-        fs << "reprojError" << rms << "R" << R << "Euler_R" << rotVector_R << "T" << T << "F" << F  ;
-        fs.release();
-    }
-    else
+
+  if( fs.isOpened() )
+  {
+      fs << "reprojError" << rms << "R" << R << "Euler_R" << rotVector_R << "T" << T << "F" << F  ;
+      fs.release();
+  }
+  else
 	{
-        cout << "Error: can not save the extrinsic parameters after stereo Calibration\n";
+      cout << "Error: can not save the extrinsic parameters after stereo Calibration\n";
 	}
 
 }
@@ -435,14 +472,14 @@ void saveExtrinsicParameters(const char* extrinsics_file,cv::Mat R, cv::Mat T,cv
 
 // Overloaded : save( by "appending" to extrinsics) rectification transformation matrices...
 // What if Results already exist ?
-// Since openCV doesnt allow duplicate keys in XML file ( and doesn't overwrite existing keys),
+// Since openCV doesnt allow duplicate tags in XML file (and doesn't overwrite existing keys),
 // and we wish to append results, we need to copy required existing file content and write it back.
 void saveExtrinsicParameters(const char* extrinsics_file,Mat R1, Mat R2,Mat P1, Mat P2, Mat Q)
 {
 	cv::Mat R,rotVector_R,T,F;
 	double reprojError;
 	
-	// read results ( only to copy then back ...)
+	// read results ( only to copy them back ...)
 	FileStorage fs1(extrinsics_file, FileStorage::READ);
 	if(fs1.isOpened())
 	{
@@ -471,7 +508,7 @@ void saveExtrinsicParameters(const char* extrinsics_file,Mat R1, Mat R2,Mat P1, 
     }
     else
 	{
-        cout << "Error: can not save the extrinsic parameters after Stereo Rectification\n";
+        std::cerr << "Error: Can't save the extrinsic parameters after Stereo Rectification!\n";
 	}
 
 }
@@ -496,6 +533,8 @@ void displayNormalLines(cv::Mat canvas,bool isVerticalStereo)
 
 
 // Rectifies images using cv::stereoRectify() and appends results to extrinsics file
+// Stereo Rectification is done to ease the stereo Correspondence problem.
+// The output of rectification is a rotation matrix for each camera
 int rectifyImages(const char* intrinsics_file,const char* extrinsics_file, bool display=false)
 {
 	std::cout << "Rectifying images..." << "\n";
@@ -537,7 +576,7 @@ int rectifyImages(const char* intrinsics_file,const char* extrinsics_file, bool 
 	fs2.release(); 
 
 
-	cv::Mat R1, R2, P1, P2, Q; // Recitfication matrices - Output of cv::stereoRectify()
+	cv::Mat R1, R2, P1, P2, Q; // Rectification matrices - Output of cv::stereoRectify()
 	Rect validRoi[2];
 
 	// Image rectification 
@@ -546,10 +585,11 @@ int rectifyImages(const char* intrinsics_file,const char* extrinsics_file, bool 
 	              Size(640,480), R, T, R1, R2, P1, P2, Q,
 	              CALIB_ZERO_DISPARITY, 1, Size(640,480), &validRoi[0], &validRoi[1]);
 
-	// appends results to extrinsics file
+	// APPENDS results to extrinsics file
 	saveExtrinsicParameters(extrinsics_file,R1,R2,P1,P2,Q);
 	
 	std::cout << "Displaying rectified images..." << "\n";
+
 	// Display rectified images
 	if(display)
 	{
@@ -558,7 +598,7 @@ int rectifyImages(const char* intrinsics_file,const char* extrinsics_file, bool 
 
 
 		//compute maps for cv::remap()
-		 Mat rmap[2][2];
+		cv::Mat rmap[2][2];
 		initUndistortRectifyMap(cameraMatrix1, distCoeffs1, R1, P1, imageSize, CV_16SC2, rmap[0][0], rmap[0][1]);
 		initUndistortRectifyMap(cameraMatrix2, distCoeffs2, R2, P2, imageSize, CV_16SC2, rmap[1][0], rmap[1][1]);
 
@@ -588,17 +628,20 @@ int rectifyImages(const char* intrinsics_file,const char* extrinsics_file, bool 
 		// iterate over pair of grayscale images
 		for( int i = 0, len = goodGrayImageList.size()/2 ; i < len ; i++ )
 		{ 
-			Mat img1 = goodGrayImageList[i*2];
+			cv::Mat img1 = goodGrayImageList[i*2];
 			cv::Mat img2 = goodGrayImageList[i*2+1];
-			Mat rect_img1, cimg1;
-
+			
 
 			if( !img1.empty() && !img2.empty() )
 			{
-				// the remap function works as follows - where (x,y) is a pixel coordinate
+			
+				cv::Mat rect_img1, cimg1;
+
+				// The remap function works as follows - where (x,y) is a pixel coordinate
 				// dest(x,y) = src(rmap[0][0]*(x,y), rmap[0][1]*(x,y)) ??!
+				// if rmap[0][0/1]*(x,y) results in non-integer coordinates, then pixel value is interpolated(bilinear).
 				remap(img1, rect_img1, rmap[0][0], rmap[0][1], INTER_LINEAR);
-				cvtColor(rect_img1, cimg1, COLOR_GRAY2BGR); //this is done so that lines (see below ) can be displayed in colour
+				cvtColor(rect_img1, cimg1, COLOR_GRAY2BGR); //this is done so that lines (see below) can be displayed in colour
 				cv::Mat canvasPart1 = !isVerticalStereo ? canvas(Rect(0, 0, w, h)) : canvas(Rect(0, 0, w, h));
 				resize(cimg1, canvasPart1, canvasPart1.size(), 0, 0, INTER_AREA);
 
@@ -608,31 +651,37 @@ int rectifyImages(const char* intrinsics_file,const char* extrinsics_file, bool 
 				remap(img2, rect_img2, rmap[1][0], rmap[1][1], INTER_LINEAR);
 				cvtColor(rect_img2, cimg2, COLOR_GRAY2BGR);
 				cv::Mat canvasPart2 = !isVerticalStereo ? canvas(Rect(w, 0, w, h)) : canvas(Rect(0, h, w, h));
-	
 				resize(cimg2, canvasPart2, canvasPart2.size(), 0, 0, INTER_AREA);
 
 		
-				// display epipolar lines
+				//===== Display Epipolar lines ======
+
+				// select random color from [0,256)
 				cv::Scalar line_color(rng(256),rng(256),rng(256));
 
+				// undistort corner coordinates.
 				std::vector< Point2f > undistortedCorners1, undistortedCorners2;
-
 				cv::undistortPoints(left_img_points[i],undistortedCorners1,cameraMatrix1,distCoeffs1,R1,P1);
 				cv::undistortPoints(right_img_points[i],undistortedCorners2,cameraMatrix2,distCoeffs2,R2,P2);
 
+				// Remember epipolar lines are simply [a,b,c] in homogenous coordinates.
 				std::vector<Vec3f> epilines1,epilines2;
 				cv::computeCorrespondEpilines(undistortedCorners1, 1, F, epilines1); //Index starts with 1
 				cv::computeCorrespondEpilines(undistortedCorners2, 2, F, epilines2);
 
 				
-				// For some of the detected point in the pair of images
+				// For some of the detected points in a pair of images, display epipolar lines.
 				for(int i = 0 , len = undistortedCorners1.size() ; i < len ; i+=len/8)
 				{
-					cv::line(canvasPart1,cv::Point(0,-epilines2[i][2]/epilines2[i][1]),cv::Point(img1.cols,-(epilines2[i][2]+epilines2[i][0]*img1.cols)/epilines2[i][1]),line_color);
-	
+					// To draw a line, specify 2 end points.
+					// The 2 end points below are obtained by simply substituting x = 0 and x = img1/2.cols.
+					cv::line(canvasPart1,cv::Point(0,-epilines2[i][2]/epilines2[i][1]),
+								cv::Point(img1.cols,-(epilines2[i][2]+epilines2[i][0]*img1.cols)/epilines2[i][1]),line_color);
+
 					cv::line(canvasPart2,cv::Point(0,-epilines1[i][2]/epilines1[i][1]),
 			  				cv::Point(img2.cols,-(epilines1[i][2]+epilines1[i][0]*img2.cols)/epilines1[i][1]),line_color);
 			
+					// To check if epipolar lines are passing through (corresponding) points, display points on image as well.
 					cv::circle(canvasPart1, undistortedCorners1[i], 3, line_color, -1, CV_AA);
 					cv::circle(canvasPart1, undistortedCorners1[i], 3, line_color, -1, CV_AA);
 
@@ -642,12 +691,12 @@ int rectifyImages(const char* intrinsics_file,const char* extrinsics_file, bool 
 			}
 
 
-			else{ std::cerr << "One of the iamge pairs is empty ! for i =" << i <<  "\n"; }
+			else
+			{ 
+				std::cerr << "One of the iamge pairs is empty ! for i =" << i <<  "\n"; 
+			}
 
-			
-			
-
-			
+		
 			cv::imshow("rectified", canvas);
 
 			char c = (char)waitKey();
@@ -664,16 +713,19 @@ int rectifyImages(const char* intrinsics_file,const char* extrinsics_file, bool 
 
 
 // The imp function where most tasks are carried out.
-// 1) Simply fetches the pre-known 3D object coordinate ( Z = 0 always) of chessboard corners 
-// 2) (optional)Then reads in the camera matrices internal parameters from files
-// 3) Uses cv::stereoCalibrate() to find R and T between camera1 and camera2 + save improvised intrinsic params in xml file
-// 4) Uses cv::stereoRectify(R,T,etc) -> R1,T1,P1,P2 + save output as extrinsic params in xml file
+// 1) Simply fetches the pre-known 3D object coordinate (Z = 0 always) of chessboard corners 
+// 2) Then reads in the camera matrices internal parameters from files --> Make this optional later ?
+// 3) Uses cv::stereoCalibrate() to find R and T between camera1 and camera2 + improves intrinsic params
+// 4) If result of step 3) gives better/lower rms than before, then overwrite parameter in files.
 
+
+// 4) Uses cv::stereoRectify(R,T,etc) -> R1,T1,P1,P2 + save output as extrinsic params in xml file
 int RunAndSaveStereoCalibration(const char* leftCalibFile, const char* rightCalibFile,const char* intrinsics_file,const char* extrinsics_file)
 {	
-	// Create object points, can use either left or right imagepoint list to resize
-	vector<vector<Point3f> > objectPoints(1);
+	// fetch object points
+	std::vector<vector<Point3f> > objectPoints(1);
 	calcKnownBoardCornerPositions(chessBoardDimension,calibSquareSize,objectPoints[0]);
+	// can use either left or right imagepoint list to resize.
 	objectPoints.resize(left_img_points.size(),objectPoints[0]);
 	
 	cv::Mat cameraMatrix1, distCoeffs1;
@@ -685,7 +737,7 @@ int RunAndSaveStereoCalibration(const char* leftCalibFile, const char* rightCali
 
 	if(!fs1.isOpened())
 	{
-		cout << "Please supply LEFT camera internal calibration parameters! "<< "\n";
+		std::cerr << "Please supply LEFT camera internal calibration parameters! "<< "\n";
 		return -1;
 	}
 	
@@ -699,7 +751,7 @@ int RunAndSaveStereoCalibration(const char* leftCalibFile, const char* rightCali
 
 	if(!fs2.isOpened())
 	{
-		cout << "Please supply RIGHT camera internal calibration parameters! "<< "\n";
+		std::cerr << "Please supply RIGHT camera internal calibration parameters! "<< "\n";
 		return -1;
 	}
 
@@ -722,14 +774,13 @@ int RunAndSaveStereoCalibration(const char* leftCalibFile, const char* rightCali
 	cv::TermCriteria(TermCriteria::COUNT+TermCriteria::EPS, 100, 1e-5) );
 
 	
-	std::cerr  << "stereo calibration re-projection error = " << rms << "\n" ;	
-	std::cerr  << "Translation vector" << "\n" << T << "\n" ; 
+	std::cerr  << "stereo calibration re-projection rms error = " << rms << "\n" ;	
+	std::cerr  << "Translation vector:\n" << T << "\n" ; 
 
-	
 
 	// save intrinsic parameters,why after stereoCalibrate ? 
-	//  According to docs, it improves them
-	// Only store results if better re-projection error than befores
+	// According to docs, it improves them
+	// Only store results if better/lesser re-projection error than before
 	bool better = betterThanPreviousReprojectionError(extrinsics_file,rms);
 	if(better)
 	{	
@@ -738,7 +789,7 @@ int RunAndSaveStereoCalibration(const char* leftCalibFile, const char* rightCali
 		saveExtrinsicParameters(extrinsics_file,R,T,F,rms);
 	}
 	
-
+	// Release resources
 	cv::destroyAllWindows();
 
 }
@@ -746,39 +797,41 @@ int RunAndSaveStereoCalibration(const char* leftCalibFile, const char* rightCali
 
 //======================== Triangulation Section ===========================
 
-// Find feature points in both input images.
+// Find feature points in both input images using SURF + Flann.
 bool foundCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2,vector< Point2f >& observedCorners1,vector< Point2f >& observedCorners2,bool corner_refine=true, bool display=false)
 {
 
 	bool foundBoth = false; 
 
-	/*
+	/* If finding chess board corners in images.
 		bool found1 = cv::findChessboardCorners(img1, chessBoardDimension, observedCorners1,
 		CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
 		bool found2 = cv::findChessboardCorners(img2, chessBoardDimension, observedCorners2,
 		CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
 
-
 		foundBoth = found1 && found2;
 	*/
 	
 
-	//-- Step 1: Feature Detector + Descritor ( SURF )
+	//-- Step 1: Feature Detector + Descriptor ( SURF )
 	int minHessian = 400;
-	Ptr<SURF> detector = SURF::create();
+	Ptr<cv::xfeatures2d::SURF> detector = cv::xfeatures2d::SURF::create();
 	detector->setHessianThreshold(minHessian);
+
 	std::vector<KeyPoint> keypoints_1, keypoints_2;
-	Mat descriptors_1, descriptors_2;
+	cv::Mat descriptors_1, descriptors_2;
+	
+	// Detect keypoints and compute descriptors.
 	detector->detectAndCompute( img1, Mat(), keypoints_1, descriptors_1 );
 	detector->detectAndCompute( img2, Mat(), keypoints_2, descriptors_2 );
 
 	//-- Step 2: Matching descriptor vectors using FLANN matcher
-	FlannBasedMatcher matcher;
+	cv::FlannBasedMatcher matcher;
 	std::vector< DMatch > matches; // DMatch is openCV class that holds matched descriptors
 
 	if(descriptors_1.empty() || descriptors_2.empty())
 	{
-		std::cout << "One of the iamges does not have any features !\n";
+		std::cerr << "No features were detected in one/both images !\n";
 	}
 	else
 	{
@@ -794,11 +847,11 @@ bool foundCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2,vector< Poin
 			if( dist < min_dist ) min_dist = dist;
 			if( dist > max_dist ) max_dist = dist;
 		}
-		//printf("-- Max dist : %f \n", max_dist );
-		//printf("-- Min dist : %f \n", min_dist );
-		//-- Draw only "good" matches (i.e. whose distance is less than 2*min_dist,
-		//-- or a small arbitary value ( 0.02 ) in the event that min_dist is very
-		//-- small)
+	
+		// distance below refers to distance between descritors
+		// Filter out "good" matches (i.e. whose distance is less than 2*min_dist,
+		// or a small arbitary value ( 0.02 ) in the event that min_dist is very
+		// small)
 		//-- PS.- radiusMatch can also be used here.
 		std::vector< DMatch > good_matches;
 		for( int i = 0; i < descriptors_1.rows; i++ )
@@ -810,14 +863,16 @@ bool foundCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2,vector< Poin
 	
 		for(int i = 0 , len = good_matches.size() ; i < len ; ++i)
 		{
+			// Here queryIdx indexes into keyPoints1 since match() was called in specific order(above).
 			observedCorners1.push_back(keypoints_1[good_matches[i].queryIdx].pt);
 			observedCorners2.push_back(keypoints_2[good_matches[i].trainIdx].pt);	
 		}
 
+		// ==== Subpixel corner-refinement ===
 		if(corner_refine)
 		{
-			cout << "started refining ..." << "\n";
-			// Subpixel corner refinement
+			std::cerr << "started refining ..." << "\n";
+			
 			cv::Mat gray1,gray2;
 			cvtColor(img1, gray1, CV_BGR2GRAY);
 			cvtColor(img2, gray2, CV_BGR2GRAY);
@@ -828,7 +883,7 @@ bool foundCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2,vector< Poin
 			cv::cornerSubPix(gray2, observedCorners2, cv::Size(5, 5), cv::Size(-1, -1),
 			cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
 				
-			cout << "finished refining ..." << "\n";
+			std::cerr << "finished refining ..." << "\n";
 		}
 
 		if(display)
@@ -843,7 +898,6 @@ bool foundCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2,vector< Poin
 			/*
 				// Size(5,5) is recommended (by docs) neighbourhood size used in corner refinement algorithm.
 				// It is in-place, observedCorners1 is input and output.
-	
 				cv::drawChessboardCorners(img1, chessBoardDimension, observedCorners1, found1);
 				cv::drawChessboardCorners(img2, chessBoardDimension, observedCorners2, found2);
 			*/
@@ -864,14 +918,14 @@ bool foundCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2,vector< Poin
 // 		  and hence If the cameras' relative orientation changes, then the extrinsics
 // 		  will change too and hence new extrinsics will need to be found before triangulation.
 
-//Note - intrinsics_file and extrinsics_file contain parameters for stereo cameras
+// Note - intrinsics_file and extrinsics_file contain parameters for both cameras
 int doTriangulate(const char* intrinsics_file,const char* extrinsics_file)
 {
 	std::stringstream ss;  // used during display.
-	cv::Mat P1,R1,cameraMatrix1,distCoeffs1,P2, R2,cameraMatrix2,distCoeffs2;
-
-	cout << "Assuming stereo REctification has been done ..." << "\n";
-	cout << "Reading Intrinsics and Extrinsic parameters of stereo camera setup ..." << "\n";
+	cv::Mat cameraMatrix1,distCoeffs1,R1,P1,cameraMatrix2,distCoeffs2,R2,P2;  // needed for undistorting feature points.
+ 
+	std::cerr << "Assuming stereo Rectification has been done ..." << "\n";
+	std::cerr << "Reading Intrinsics and Extrinsic parameters of stereo camera setup ..." << "\n";
 		
 	FileStorage fs1;
 	fs1.open(intrinsics_file, FileStorage::READ);	
@@ -899,20 +953,23 @@ int doTriangulate(const char* intrinsics_file,const char* extrinsics_file)
 	fs2.release();
 
 	
-	cout << "Entered triangulation Section ..." << "\n";
-	VideoCapture vid1(1);
-	VideoCapture vid2(2);
+	std::cerr << "Entered triangulation Section ..." << "\n";
+	cv::VideoCapture vid1(1);
+	cv::VideoCapture vid2(2);
 	
-	
+	// For range based HSV thresholding later.
 	int h_min = 0 , h_max = 9 ;
-			int s_min = 207, s_max = 255;
-			int v_min = 24 , v_max = 236;
+	int s_min = 207, s_max = 255;
+	int v_min = 24 , v_max = 236;
 	
 	int h_min2 = 0 , h_max2 = 216 ;
-			int s_min2 = 143, s_max2 = 255;
-			int v_min2 = 218 , v_max2 = 255;
+	int s_min2 = 143, s_max2 = 255;
+	int v_min2 = 218 , v_max2 = 255;
+
 	if(vid1.isOpened() && vid2.isOpened() )
 	{
+		// For each image, find corresponding features
+		//while(true)
 		for(;;)
 		{
 			cv::Mat img1,img2;
@@ -927,19 +984,18 @@ int doTriangulate(const char* intrinsics_file,const char* extrinsics_file)
 			
 			// convert to HSV ?
 			cv::Mat hsv_frame1, hsv_frame2 ;
-
 			cv::cvtColor(img1,hsv_frame1,CV_BGR2HSV);
 			cv::cvtColor(img2,hsv_frame2,CV_BGR2HSV);
 				
-			
+			// range-based thresholding 
 			cv::inRange(hsv_frame1,Scalar(h_min,s_min,v_min),Scalar(h_max,s_max,v_max),hsv_frame1);
 			cv::inRange(hsv_frame2,Scalar(h_min2,s_min2,v_min2),Scalar(h_max2,s_max2,v_max2),hsv_frame2);
 			
 			cvtColor(hsv_frame1, img1, CV_GRAY2BGR); 
 			cvtColor(hsv_frame2, img2, CV_GRAY2BGR); 
 			
-			std::cout << "CONVERTED to HSV.... !!" << "\n";
-			bool foundBoth = foundCorrespondingFeaturesBothImages(img1,img2,observedCorners1,observedCorners2,true,false);
+			std::cerr << "CONVERTED to HSV.... !!" << "\n";
+			bool foundBoth = foundCorrespondingFeaturesBothImages(img1,img2,observedCorners1,observedCorners2,true,true);
 			
 			if(foundBoth) 
 			{
@@ -957,20 +1013,16 @@ int doTriangulate(const char* intrinsics_file,const char* extrinsics_file)
 				cv::undistortPoints(observedCorners1,undistortedCorners1,cameraMatrix1,distCoeffs1,R1,P1);
 				cv::undistortPoints(observedCorners2,undistortedCorners2,cameraMatrix2,distCoeffs2,R2,P2);
 
-				//cout << "After undistort" << "\n";
-				//cout << "Observed corners 1 = \n" << observedCorners1 << "\n";
-				//cout << "uUndistorted corners 1 = \n" << undistortedCorners1 << "\n";
+				//std::cerr << "After undistort" << "\n";
+				//std::cerr << "Observed corners 1 = \n" << observedCorners1 << "\n";
+				//std::cerr << "uUndistorted corners 1 = \n" << undistortedCorners1 << "\n";
 
-				cv::Mat pnts4D(1,undistortedCorners2.size(),CV_64FC4); // For output of cv::triangulatePoints()
 				//  cv::Mat projMat1,projMat2 ; projMat1 = computeProjectionMatrix(cameraMatrix1,R,T); projMat2 = computeProjectionMatrix(cameraMatrix2,R,T);
-								
-				
+				cv::Mat pnts4D(1,undistortedCorners2.size(),CV_64FC4); // For output of cv::triangulatePoints()			
 				cv::triangulatePoints(P1,P2,undistortedCorners1,undistortedCorners2,pnts4D);
 			
-				//cout << "The 4D points are = " << "\n" << pnts4D << "\n"; 
-
-				// since output of triangulation is 1XN 4 channel array ( homogenous coordinates )
-				// we convert it to a 4-channel Matrix using cv:merge().
+				// since output of triangulation is 1 X N 4-channel array ( homogenous coordinates )
+				// we convert it to a 4 X N 1-channel Matrix using cv::merge().
 				cv::Mat multiChannelMat = convertToMultiChannel(pnts4D);
 				
 				//convert output to 3D cartesian coordinates (x,y,z)
@@ -978,15 +1030,12 @@ int doTriangulate(const char* intrinsics_file,const char* extrinsics_file)
 				cv::convertPointsFromHomogeneous(multiChannelMat,pnts3D);
 					
 		
-				//cout << "pnts4D = \n" << pnts4D << "\n";cout << "pnts3D = \n" << pnts3D << "\n";
-
 				// Display (x,y,z) coordinates on the image(s)
-				// Let's just try for 1/3 points
-				for(unsigned i=0, len = observedCorners1.size(); i < len ; i+=len/3)
+				for(unsigned i=0, len = observedCorners1.size(); i < len ; i+=1)
 				{
 					ss << "( " << pnts3D.at<float>(i,0) <<" , " << pnts3D.at<float>(i,1) << " , " << pnts3D.at<float>(i,2) <<" )" ;
 					
-					//cout << "(x,y,z) =" << pnts3D.rowRange(i,i+1) << "\n";
+					//cout << "(x,y,z) =" << pnts3D.col(i) << "\n";
 					cv::circle(img1, undistortedCorners1[i], 3, GREEN, -1, CV_AA);
 					cv::putText(img1,ss.str(),undistortedCorners1[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, RED);
 					//cv::putText(img2,ss.str(),observedCorners2[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, RED);
@@ -1000,7 +1049,7 @@ int doTriangulate(const char* intrinsics_file,const char* extrinsics_file)
 	
 			else
 			{
-				cout << "No corresponding features found!" << "\n";
+				std::cerr << "No corresponding features found!\n";
 			}
 
 			imshow("Triangle - Left camera view", img1);
@@ -1021,7 +1070,7 @@ int doTriangulate(const char* intrinsics_file,const char* extrinsics_file)
 
 	else
 	{
-		cout << "Can't open video device input Can't triangulate,...";
+		std::cerr << "Can't open video device input Can't triangulate,...";
 	}
 
 	
@@ -1261,9 +1310,10 @@ void doDisparity(const char* intrinsics_file,const char* extrinsics_file)
 	cv::namedWindow(trackBarWindowName/*,WINDOW_AUTOSIZE*/);
 	createStereoTrackBars(trackBarWindowName);
 	
-	// temporary buffers (used inside loop)
+	// temporary buffers
 	cv::VideoCapture vid1(1), vid2(2);
 	cv::Mat left_img , right_img; 
+
 	if(vid1.isOpened() && vid2.isOpened())
 	{
 		while(1)
@@ -1301,7 +1351,7 @@ int main( int argc, const char** argv )
 
 	// We run calibration only if we are able to find corners in the input image of chessboard
 
-	int num_images = 50; //number of images to be used for calibration
+	int num_images = 10; //number of images to be used for calibration
 
 	int do_stereoCalibration = 0; // by default no stereo calibration
 	int do_rectification = 0 ;    // by default no stereo rectifcation
@@ -1329,7 +1379,7 @@ int main( int argc, const char** argv )
 
 		if(foundImagePoints)
 		{
-			cout << " Image points have been succesfully detected." << "\n";
+			std::cout << " Image points have been succesfully detected\n";
 			RunAndSaveStereoCalibration(internal_calibFile1,internal_calibFile2,intrinsics_file,extrinsics_file);
 		}
 	}
@@ -1340,12 +1390,12 @@ int main( int argc, const char** argv )
 		rectifyImages(intrinsics_file,extrinsics_file,false);
 	}
 
-	// Try either of the two - maybe do triangulation just to see how the 3D points are
+	// Try either of the two - maybe do triangulation just to see how value of 3D points
 	doTriangulate(intrinsics_file, extrinsics_file);
 
 	//doDisparity(intrinsics_file,extrinsics_file);
 
-	cout << "Finished." << "\n";
+	std::cerr << "Finished." << "\n";
 
 	return 0;
 
