@@ -57,6 +57,8 @@ class StereoCamera
 		bool readParamsFromFile(const char* extrinsics_file);
 	
 		// Getters and Setters
+		void getCameraIDs(int* id_left, int* id_right) const;
+
 		void updateIntrinsicParams(cv::Mat cameraMatrix1,cv::Mat distCoeffs1,cv::Mat cameraMatrix2, cv::Mat distCoeffs2,bool saveToFile=false);
 		void saveIntrinsicParametersToFile(cv::Mat cameraMatrix1, cv::Mat cameraMatrix2, cv::Mat distCoeffs1, cv::Mat distCoeffs2);
 
@@ -74,7 +76,7 @@ class StereoCamera
 		int rectifyImages(bool display=false);
 		bool findCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2,std::vector< cv::Point2f >& observedCorners1, std::vector< cv::Point2f >& observedCorners2,bool corner_refine=true, bool display=false);
 		int doTriangulate();
-		
+		cv::Mat doTriangulate_SingleFrame(cv::Mat img1, cv::Mat img2, bool display=false);
 };
 
 

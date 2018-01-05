@@ -9,12 +9,18 @@
 #include <cv.h>
 #include <highgui.h>
 #include <iostream>
+#include <sstream>
 using namespace std;
 using namespace cv;
 
 
 void captureImages()
 {
+
+	int counter = 1;
+	
+	//std::string vid_left = "video/drone_left.avi";
+	//std::string vid_right = "video.drone_right.avi";
 
 	cv::VideoCapture vid1(1);
 	cv::VideoCapture vid2(2);
@@ -40,8 +46,13 @@ void captureImages()
 				char ch = (char)waitKey(100);
 				if(ch == 'c')
 				{
-					imwrite("left_img.jpg",left_img);	
-					imwrite("right_img.jpg",right_img);
+					std::stringstream ss;
+					ss << "left_img" << counter << ".jpg" ;
+					imwrite(ss.str(),left_img);	
+					ss.str("");
+	
+					ss << "right_img"<< counter << ".jpg";
+					imwrite(ss.str(),right_img);
 					break;
 				}
 	

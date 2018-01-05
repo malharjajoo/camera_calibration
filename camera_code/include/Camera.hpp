@@ -19,7 +19,10 @@ class Camera
 
 		// Setter
 		void updateIntrinsicParams(cv::Mat cameraMatrix, cv::Mat distCoeffs);
-
+		
+		// Helpers
+		void saveVideo(std::string outputFile);
+		int getFPS() const;
 };
 
 #endif

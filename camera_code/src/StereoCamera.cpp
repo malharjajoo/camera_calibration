@@ -5,6 +5,18 @@
 #include "globals.hpp"
 #include "/home/malhar/opencv-3.3.0/apps/interactive-calibration/rotationConverters.hpp"
 
+#include <vector>
+#include <opencv2/core.hpp>
+#include <opencv2/core/utility.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/calib3d.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/highgui.hpp>
+#include "opencv2/features2d.hpp"
+#include "opencv2/xfeatures2d.hpp"
+#include <opencv2/calib3d.hpp>
+
 using namespace std;
 using namespace cv;
 using namespace cv::xfeatures2d;
@@ -12,6 +24,15 @@ using namespace cv::xfeatures2d;
 const int wait_key_delay = 1000;
 
 //==================== Helper functions ===================
+
+
+void StereoCamera::getCameraIDs(int* id_left, int* id_right) const
+{
+	(*id_left) = this->left_camera.id;
+	(*id_right) = this->right_camera.id;
+
+}
+
 
 // 1) Display general info on Matrices
 // 2) convert single channel input to multi channel cv::Mat
@@ -160,7 +181,11 @@ static void calcKnownBoardCornerPositions(Size boardSize, float squareSize, vect
 bool fexists(const char *filename)
 {
   ifstream ifile(filename);
-  return ifile;
+	if(!ifile)
+		return false;
+	else
+		return true;
+  
 }
 
 
@@ -903,6 +928,96 @@ bool StereoCamera::findCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2
 
 
 
+cv::Mat StereoCamera::doTriangulate_SingleFrame(cv::Mat img1, cv::Mat img2, bool display/*=false*/)
+{
+	std::stringstream ss;  // used during display.
+
+
+	// needed for undistorting and triangulting feature points.
+	cv::Mat cameraMatrix1 = this->left_camera.cameraMatrix;
+	cv::Mat distCoeffs1 = this->left_camera.distCoeffs;
+	cv::Mat R1 = this->R1;
+	cv::Mat P1 = this->P1;
+	cv::Mat cameraMatrix2 = this->right_camera.cameraMatrix;
+	cv::Mat distCoeffs2 = this->right_camera.distCoeffs;
+	cv::Mat R2 = this->R2;
+	cv::Mat P2 = this->P2;
+	
+
+	 // For each image, find corresponding features, undistort corners and then triangulate
+	 std::vector< Point2f > observedCorners1, observedCorners2, undistortedCorners1, undistortedCorners2;
+
+		
+		bool foundBoth = this->findCorrespondingFeaturesBothImages(img1,img2,observedCorners1,observedCorners2,true,true);
+		
+		if(foundBoth) 
+		{
+			//========== Undistort and triangulate ============
+
+			//convertPoint2fTo2ChannelMatrix(observedCorners1) ?? Do I need to do this to convert input into acceptable format ( according to doc ) ?
+
+			// From the API doc -
+			// cv::undistortPoints() first converts observed features to "normalized" ( independent of camera )
+			// by applying inverse of camera matrix. Then it undistorts it using cv::undistort().
+			// If P matrix is given, it converts to 3D coordinates and does a projection back to 2D coordinates.
+
+			// Note - For 3D objects it does not reconstruct 3D coordinates ( but how does it know that input image	
+			// contains 3D object and not a planar one like a chessboard ?)
+			cv::undistortPoints(observedCorners1,undistortedCorners1,cameraMatrix1,distCoeffs1,R1,P1);
+			cv::undistortPoints(observedCorners2,undistortedCorners2,cameraMatrix2,distCoeffs2,R2,P2);
+
+			//std::cerr << "After undistort" << "\n";
+			//std::cerr << "Observed corners 1 = \n" << observedCorners1 << "\n";
+			//std::cerr << "uUndistorted corners 1 = \n" << undistortedCorners1 << "\n";
+
+			//  cv::Mat projMat1,projMat2 ; projMat1 = computeProjectionMatrix(cameraMatrix1,R,T); projMat2 = computeProjectionMatrix(cameraMatrix2,R,T);
+			cv::Mat pnts4D(1,undistortedCorners2.size(),CV_64FC4); // For output of cv::triangulatePoints()			
+			cv::triangulatePoints(P1,P2,undistortedCorners1,undistortedCorners2,pnts4D);
+		
+			// since output of triangulation is 1 X N 4-channel array ( homogenous coordinates )
+			// we convert it to a 4 X N 1-channel Matrix using cv::merge().
+			cv::Mat multiChannelMat = convertToMultiChannel(pnts4D);
+			
+			//convert output to 3D cartesian coordinates (x,y,z)
+			cv::Mat pnts3D(1,undistortedCorners1.size(),CV_64FC3);
+			cv::convertPointsFromHomogeneous(multiChannelMat,pnts3D);
+				
+			if(display)
+			{
+				// Display (x,y,z) coordinates on the image(s)
+				for(unsigned i=0, len = observedCorners1.size(); i < len ; i+=1)
+				{
+					ss << "( " << pnts3D.at<float>(i,0) <<" , " << pnts3D.at<float>(i,1) << " , " << pnts3D.at<float>(i,2) <<" )" ;
+				
+					//cout << "(x,y,z) =" << pnts3D.col(i) << "\n";
+					cv::circle(img1, observedCorners1[i], 3, GREEN, -1, CV_AA);
+					cv::putText(img1,ss.str(),observedCorners1[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, RED);
+					//cv::putText(img2,ss.str(),observedCorners2[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, RED);
+				
+
+					ss.str(""); //clear the stringstream buffer
+				}
+				
+			}
+			
+			return pnts3D;
+
+		}
+
+		else
+		{
+			std::cerr << "No corresponding features found!\n";
+			cv::Mat empty;
+			return empty;
+		}
+	
+
+	
+} 
+
+
+
+
 
 // Input - Main Inputs are extrinsic parameters of a stereo camera setup. 
 // Note - the extrinsic are only valid for a particular stereo camera setup
@@ -1058,6 +1173,8 @@ int StereoCamera::doTriangulate()
 	
 	
 } 
+
+
 
 
 

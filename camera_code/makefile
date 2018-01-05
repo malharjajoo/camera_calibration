@@ -1,12 +1,15 @@
 QUIET=@
-LDFLAGS=`pkg-config --cflags opencv --libs opencv`
+
 SRC_FOLDER=src
-WARNING_FLAGS=-Wno-write-strings
-GCC_OPTS=-O0
+
+CPPFLAGS += -std=c++11 -Wno-write-strings
+CPPFLAGS += -I include
+#CPPFLAGS += -O3
+LDFLAGS=`pkg-config --cflags opencv --libs opencv`
 
 .PHONY: all bin/test
 
 all: bin/test
 
-bin/test: $(SRC_FOLDER)/stereoCalibrate.cpp
-	$(CXX)$(WARNING_FLAGS) $< -o $@ $(LDFLAGS)
+bin/test: $(SRC_FOLDER)/top.cpp $(SRC_FOLDER)/StereoCamera.cpp $(SRC_FOLDER)/Camera.cpp $(SRC_FOLDER)/Detector.cpp
+	$(CXX) $(CPPFLAGS) $^ -o $@ $(LDFLAGS)
