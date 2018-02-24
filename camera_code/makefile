@@ -11,5 +11,6 @@ LDFLAGS=`pkg-config --cflags opencv --libs opencv`
 
 all: bin/test
 
+# The positioning of the linker flags is imp.
 bin/test: $(SRC_FOLDER)/top.cpp $(SRC_FOLDER)/StereoCamera.cpp $(SRC_FOLDER)/Camera.cpp $(SRC_FOLDER)/Detector.cpp
 	$(CXX) $(CPPFLAGS) $^ -o $@ $(LDFLAGS)

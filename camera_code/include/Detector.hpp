@@ -37,16 +37,16 @@ class DroneDetector:public Detector
 
 	public:
 
-		DroneDetector(cv::VideoCapture vid);
+		DroneDetector();
 
 		cv::Rect detect(cv::Mat frame) override;
 
 		void displayInfo() override;
 
 		// helpers
-		
 		cv::Mat getBackgroundImage(cv::VideoCapture vid); //for background subtraction
 	  
+	  	void initializeBackground(cv::Mat bg_img);
 };
 
 

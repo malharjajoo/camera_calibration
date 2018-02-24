@@ -26,6 +26,7 @@ static void print_help()
            "[--no-display] [-o=<disparity_image>] [-p=<point_cloud_file>]\n");
 }
 
+// Saves a matrix mat to a file.
 static void saveXYZ(const char* filename, const Mat& mat)
 {
     const double max_z = 1.0e4;
@@ -166,7 +167,9 @@ int main(int argc, char** argv)
 
     Rect roi1, roi2;
     Mat Q;
-fprintf(stderr,"See this 1..\n");
+    fprintf(stderr,"Rectifying images ..\n");
+
+    // If intrinsic and extrinsics are given, it rectifies both images.
     if( !intrinsic_filename.empty() )
     {
         // reading intrinsic parameters
@@ -265,13 +268,14 @@ fprintf(stderr,"See this 1..\n");
         disp.convertTo(disp8, CV_8U, 255/(numberOfDisparities*16.));
     else
         disp.convertTo(disp8, CV_8U);
+    
     if( !no_display )
     {
         namedWindow("left", 1);
         imshow("left", img1);
         namedWindow("right", 1);
         imshow("right", img2);
-        namedWindow("disparity", 0);
+        namedWindow("disparity", 0); 
         imshow("disparity", disp8);
         printf("press any key to continue...");
         fflush(stdout);

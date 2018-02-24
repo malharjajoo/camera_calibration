@@ -77,6 +77,7 @@ class StereoCamera
 		bool findCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2,std::vector< cv::Point2f >& observedCorners1, std::vector< cv::Point2f >& observedCorners2,bool corner_refine=true, bool display=false);
 		int doTriangulate();
 		cv::Mat doTriangulate_SingleFrame(cv::Mat img1, cv::Mat img2, bool display=false);
+		void doDisparity(const char* intrinsics_file, const char* extrinsics_file);
 };
 
 

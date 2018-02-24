@@ -16,6 +16,7 @@ const cv::Scalar RED(0,0,255), GREEN(0,255,0), BLUE(255,0,0);
 const int esc_ascii = 27;
 
 // For HSV thresholding
+// Note that the min and maximum value for H-component is [0,180) in OpenCV.
 extern int h_min ; 
 extern int h_max ; 
 extern int s_min ;

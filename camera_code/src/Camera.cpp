@@ -38,7 +38,7 @@ Camera::Camera(int id, const char* intrinsics_file):id(id)
 }
 
 
-
+// reads intrinsic parameters and stores as data members.
 bool Camera::readParamsFromFile(const char* intrinsics_file)
 {
 	// Read some parameters from the input file
@@ -76,8 +76,6 @@ void Camera::updateIntrinsicParams(cv::Mat cameraMatrix, cv::Mat distCoeffs)
 
 
 // =================== Camera related ============================
-
-
 
 // saves a video on a particular webcam id
 // stores video as .avi format, using XVID codec

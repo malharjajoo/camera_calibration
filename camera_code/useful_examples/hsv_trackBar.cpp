@@ -10,7 +10,7 @@ using namespace cv;
 // for h,s,v values.
 // h: { 0-180}, s:{0-255} , v:{0-255}
 int h_min = 0 ; 
-int h_max = 180; 
+int h_max = 179; 
 int s_min = 0 ;
 int s_max = 255;
 int v_min = 0; 
@@ -236,7 +236,21 @@ int main(int argc,char** argv)
 		
 	std::string window_name1 = "Original image left";
 	std::string window_name2 = "Original image right";
-	namedWindow(window_name1); namedWindow(window_name2);
+	std::string hsv_window_name1 = "HSV thresholded Left";
+	std::string hsv_window_name2 = "HSV thresholded Right";
+
+	namedWindow(window_name1, cv::WINDOW_NORMAL); 
+	namedWindow(window_name2, cv::WINDOW_NORMAL);
+	namedWindow(hsv_window_name1, cv::WINDOW_NORMAL); 
+	namedWindow(hsv_window_name2, cv::WINDOW_NORMAL);
+
+	cv::moveWindow(window_name1,20,20);
+	cv::moveWindow(window_name2,700,20);
+	cv::moveWindow(hsv_window_name1,20,500);
+	cv::moveWindow(hsv_window_name2,700,500);
+
+	//cv::resizeWindow(window_name1,20,20);
+	//cv::resizeWindow(window_name2,700,20);
 
 	while(vid1.read(frame1) && vid2.read(frame2))
 	{
@@ -263,11 +277,11 @@ int main(int argc,char** argv)
 		
 		
 		
-		imshow("HSV thresholded Left",hsv_frame1);
-		imshow("HSV thresholded Right",hsv_frame2);
+		cv::imshow(hsv_window_name1, hsv_frame1);
+		cv::imshow(hsv_window_name2, hsv_frame2);
 	
 
-		char ch = waitKey(3000);
+		char ch = waitKey(5000);
 		if(ch == 'q')
 		{break ; 		}
 

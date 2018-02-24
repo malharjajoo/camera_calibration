@@ -3,7 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include "globals.hpp"
-#include "/home/malhar/opencv-3.3.0/apps/interactive-calibration/rotationConverters.hpp"
+#include "/home/malhar/opencv/apps/interactive-calibration/rotationConverters.hpp"
 
 #include <vector>
 #include <opencv2/core.hpp>
@@ -21,7 +21,7 @@ using namespace std;
 using namespace cv;
 using namespace cv::xfeatures2d;
 
-const int wait_key_delay = 1000;
+const int wait_key_delay = 1500;
 
 //==================== Helper functions ===================
 
@@ -251,7 +251,7 @@ bool betterThanPreviousReprojectionError(const char* extrinsics_file, double cur
 			}
 
 	}
-	// if file doesnt exist, we want it to be overwritten
+	// if file doesnt exist, we want it to be overwritten (rather new is created)
 	else
 	{
 		betterThanPrevious = true;
@@ -435,7 +435,7 @@ bool saveToFile/*=false*/)
 
 
 void StereoCamera::updateRectificationParams(cv::Mat R1, cv::Mat P1,cv::Mat R2,cv::Mat P2,cv::Mat Q,
-bool saveToFile/*=false*/)
+bool appendToFile/*=false*/)
 {
 		// save result --> should I do this ??? had a condition on updating data members earlier.
 		this->R1 = R1.clone();
@@ -445,7 +445,7 @@ bool saveToFile/*=false*/)
 		this->Q  = Q.clone();
 
 	
-		if(saveToFile)
+		if(appendToFile)
 		{
 			// Appends results to extrinsics file	
 			this->appendSaveRectificationParameters(); 
@@ -459,15 +459,26 @@ bool saveToFile/*=false*/)
 
 
 //========================== Loading images and detecting features(corners) ===============================
-
+cv::Mat reduceBrightness(cv::Mat img)
+{
+	cv::Mat img2;
+	img.convertTo(img2, -1, 1, -80);
+	return img2;
+}
 // In order to use this function, images from both cameras must be present.
 // It loads images taken from stereo cameras.
 // It then detects corners in image pairs and stores the coordinates.
 // Also note that the output is stored in a global vector (for convenience)
 bool StereoCamera::load_image_points(int num_imgs/*=50*/) 
 {
-  // These are temp buffers (not entirely sure why I've used these)
-	std::vector<vector<Point2f> > imagePoints1,imagePoints2;
+	std::string left_camera_window = "left camera view";
+	std::string right_camera_window = "Right camera view";
+	cv::namedWindow(left_camera_window);
+	cv::namedWindow(right_camera_window);
+	cv::moveWindow(left_camera_window, 20,20);
+	cv::moveWindow(right_camera_window, 700,20);
+  	// These are temp buffers (not entirely sure why I've used these)
+	std::vector<vector<cv::Point2f> > imagePoints1,imagePoints2;
 
 	cv::VideoCapture vid1( this->left_camera.id );
 	cv::VideoCapture vid2( this->right_camera.id );
@@ -484,14 +495,14 @@ bool StereoCamera::load_image_points(int num_imgs/*=50*/)
 	{
 	
 		cv::Mat img1,img2;
-		std::vector< Point2f > corners1, corners2;
+		std::vector< cv::Point2f > corners1, corners2;
 
 		if(!vid1.read(img1) || !vid2.read(img2) )
 		{
 			return false;
 		}
 		
-	
+		img2 = reduceBrightness(img2);
 		bool found1 = false, found2 = false;
 
 		// stores corners' coordinates in corners1/corners2 (passed by reference)
@@ -501,6 +512,7 @@ bool StereoCamera::load_image_points(int num_imgs/*=50*/)
 		// If corners are found in both images.
 		if(found1 && found2) 
 		{
+
 			// just do it once.
 			if(this->imageSize == Size())
 			{
@@ -508,7 +520,8 @@ bool StereoCamera::load_image_points(int num_imgs/*=50*/)
 				 std::cerr << "FOUND IMAGE SIZe=" << 	this->imageSize << "\n";
 			}
 
-			
+			std::cerr << "Done " << i << "/"  << num_imgs << "." << "\n";
+
 			cv::Mat gray1,gray2;
 			cvtColor(img1, gray1, CV_BGR2GRAY);
 			cvtColor(img2, gray2, CV_BGR2GRAY);
@@ -534,10 +547,10 @@ bool StereoCamera::load_image_points(int num_imgs/*=50*/)
 		}
 		
 		// show the image pair regardless of whether corners are found.
-		imshow("Left camera view", img1);
-		imshow("Right camera view", img2);
+		imshow(left_camera_window, img1);
+		imshow(right_camera_window, img2);
 	
-    char key = (char)waitKey(wait_key_delay);
+    	char key = (char)waitKey(wait_key_delay);
 			
 		// 27 is ascii for escape key.
 		if(key == 'q' || key == esc_ascii)
@@ -575,7 +588,6 @@ bool StereoCamera::load_image_points(int num_imgs/*=50*/)
 
 
 
-
 //========================= Stereo Calibration Section ============================
 
 
@@ -588,32 +600,52 @@ bool StereoCamera::load_image_points(int num_imgs/*=50*/)
 
 int StereoCamera::runAndSaveStereoCalibration()
 {	
-	// fetch object points
-	std::vector<vector<Point3f> > objectPoints(1);
+	// fetch object/3D points
+	std::vector<std::vector<Point3f> > objectPoints(1);
 	calcKnownBoardCornerPositions(chessBoardDimension,calibSquareSize,objectPoints[0]);
 	// can use either left or right imagepoint list to resize.
 	objectPoints.resize(left_img_points.size(),objectPoints[0]);
 	
 
-	cv::Mat cameraMatrix1 = this->left_camera.cameraMatrix.clone();
-	cv::Mat distCoeffs1 = this->left_camera.distCoeffs.clone();
-	cv::Mat cameraMatrix2 = this->right_camera.cameraMatrix.clone();
-	cv::Mat distCoeffs2 = this->right_camera.distCoeffs.clone();
 
-
+	cv::Mat cameraMatrix1,distCoeffs1,cameraMatrix2, distCoeffs2;
 	// rotation and translation between left and right camera.
 	// Can think of the rotation vector as rotation required to 
 	// convert camera 1 orientation into camera 2.
 	cv::Mat R,T,E,F;
-	
-	double rms = cv::stereoCalibrate(objectPoints,left_img_points,right_img_points,
-	cameraMatrix1,distCoeffs1,cameraMatrix2,distCoeffs2,imageSize,
-	R, T, E, F,
-	CV_CALIB_USE_INTRINSIC_GUESS,
-	cv::TermCriteria(TermCriteria::COUNT+TermCriteria::EPS, 100, 1e-5) );
 
+
+
+	cameraMatrix1 = this->left_camera.cameraMatrix.clone();
+	distCoeffs1 =  this->left_camera.distCoeffs.clone();
+	cameraMatrix2 = this->right_camera.cameraMatrix.clone();
+	distCoeffs2 = this->right_camera.distCoeffs.clone();
 	
-	std::cerr  << "stereo calibration re-projection rms error = " << rms << "\n" ;	
+	// Just in case single camera calibration has not been done.
+	// It is recommended that single camera calibration be done since that 
+	// would provide the distortion coefficients as well.
+	//cameraMatrix1 = initCameraMatrix2D(objectPoints,left_img_points,imageSize,0);
+	//cameraMatrix2 = initCameraMatrix2D(objectPoints,right_img_points,imageSize,0);
+
+
+	int total_iterations =  600 ; //400
+	int min_error_threshold = 1e-6;
+	double rms = cv::stereoCalibrate(objectPoints,left_img_points,right_img_points,
+																cameraMatrix1,distCoeffs1,
+																cameraMatrix2,distCoeffs2,imageSize,
+																R, T, E, F,
+																
+															    CALIB_ZERO_TANGENT_DIST +
+															    CALIB_USE_INTRINSIC_GUESS +
+															    CALIB_RATIONAL_MODEL +
+															    CALIB_FIX_K3 + CALIB_FIX_K4 + CALIB_FIX_K5,
+																cv::TermCriteria(TermCriteria::COUNT+TermCriteria::EPS, total_iterations ,min_error_threshold) );
+
+	std::cerr  << "CameraMatrix1 vector:\n" << cameraMatrix1 << "\n" ; 
+	std::cerr  << "CameraMatrix2 vector:\n" << cameraMatrix2 << "\n" ; 
+	
+
+	std::cerr  << "Stereo calibration re-projection rms error = " << rms << "\n" ;	
 	std::cerr  << "Translation vector:\n" << T << "\n" ; 
 
 
@@ -623,7 +655,7 @@ int StereoCamera::runAndSaveStereoCalibration()
 	bool overwrite = betterThanPreviousReprojectionError(this->extrinsics_file.c_str(),rms);
 	if(overwrite)
 	{	
-		std::cerr << "Current rms is better hence overwriting!..." << "\n";
+		std::cerr << "Current rms is better hence overwriting!...\n";
 		this->updateIntrinsicParams(cameraMatrix1,distCoeffs1,cameraMatrix2,distCoeffs2, true);
 		this->updateExtrinsicParams(R,T,F,rms, true);
 		
@@ -662,141 +694,188 @@ int StereoCamera::rectifyImages(bool display/*=false*/)
 	cv::Mat R1, R2, P1, P2, Q; // Rectification matrices - Output of cv::stereoRectify()
 	Rect validRoi[2];
 
+	cv::Size imageSize(640,480);
 	// Image rectification 
 	cv::stereoRectify(cameraMatrix1, distCoeffs1,
-	             cameraMatrix2, distCoeffs2,
-	              Size(640,480), R, T, R1, R2, P1, P2, Q,
-	              CALIB_ZERO_DISPARITY, 1, Size(640,480), &validRoi[0], &validRoi[1]);
+	              cameraMatrix2, distCoeffs2,
+	              imageSize, R, T, R1, R2, P1, P2, Q,
+	              CALIB_ZERO_DISPARITY, 1, imageSize, &validRoi[0], &validRoi[1]);
 
-	this->updateRectificationParams( R1, P1, R2, P2, Q,true);
+	
+
+	bool appendToExtrinsicsFile = true;
+	this->updateRectificationParams( R1, P1, R2, P2, Q,appendToExtrinsicsFile);
 	
 
 	// Display rectified images
 	if(display)
 	{
 		
-			// This is used later to display images side by side or one below the other.
-			bool isVerticalStereo = fabs(P2.at<double>(1, 3)) > fabs(P2.at<double>(0, 3));
+		// This is used later to display images side by side or one below the other.
+		bool isVerticalStereo = fabs(P2.at<double>(1, 3)) > fabs(P2.at<double>(0, 3));
 
 
-			//compute maps for cv::remap()
-			cv::Mat rmap[2][2];
-			cv::initUndistortRectifyMap(cameraMatrix1, distCoeffs1, R1, P1, imageSize, CV_16SC2, rmap[0][0], rmap[0][1]);
-			cv::initUndistortRectifyMap(cameraMatrix2, distCoeffs2, R2, P2, imageSize, CV_16SC2, rmap[1][0], rmap[1][1]);
+		//compute maps for cv::remap()
+		cv::Mat rmap[2][2];
+		cv::initUndistortRectifyMap(cameraMatrix1, distCoeffs1, R1, P1, imageSize, CV_16SC2, rmap[0][0], rmap[0][1]);
+		cv::initUndistortRectifyMap(cameraMatrix2, distCoeffs2, R2, P2, imageSize, CV_16SC2, rmap[1][0], rmap[1][1]);
 
 
-			// Create a (coloured)canvas to dispaly rectified images.
-			cv::Mat canvas;
-			double sf;
-			int w, h;
-			if( !isVerticalStereo )
+		// Create a (coloured)canvas to display rectified images.
+		cv::Mat canvas;
+		double sf;
+		int w, h;
+		if( !isVerticalStereo )
+		{
+			sf = 600./MAX(imageSize.width, imageSize.height);
+			w = cvRound(imageSize.width*sf);
+			h = cvRound(imageSize.height*sf);
+			canvas.create(h, w*2, CV_8UC3);
+		}
+		else
+		{
+			sf = 300./MAX(imageSize.width, imageSize.height);
+			w = cvRound(imageSize.width*sf);
+			h = cvRound(imageSize.height*sf);
+			canvas.create(h*2, w, CV_8UC3);
+		}
+
+
+		cv::RNG rng(0);
+
+		std::cerr << "Displaying epipolar lines on Stereo Calibration images to verify Rectification...\n";
+		
+		std::vector< Point2f > observedCorners1, observedCorners2;
+
+		
+		cv::VideoCapture vid1(1);
+		cv::VideoCapture vid2(2);
+		if(vid1.isOpened() && vid2.isOpened())
+		{
+			cv::Mat img1, img2;
+
+			while(1)
 			{
-				sf = 600./MAX(imageSize.width, imageSize.height);
-				w = cvRound(imageSize.width*sf);
-				h = cvRound(imageSize.height*sf);
-				canvas.create(h, w*2, CV_8UC3);
-			}
-			else
-			{
-				sf = 300./MAX(imageSize.width, imageSize.height);
-				w = cvRound(imageSize.width*sf);
-				h = cvRound(imageSize.height*sf);
-				canvas.create(h*2, w, CV_8UC3);
-			}
-
-	
-			cv::RNG rng(0);
-
-
-			// iterate over pair of grayscale images	
-			int len = goodGrayImageList.size()/2;
-		for( int i = 0; i < len ; ++i )
-		{ 
-			cv::Mat img1 = goodGrayImageList[i*2];
-			cv::Mat img2 = goodGrayImageList[i*2+1];
-			
-
-				if( !img1.empty() && !img2.empty() )
+				if(vid1.read(img1) && vid2.read(img2))
 				{
-			
+
+					if( !img1.empty() && !img2.empty() )
+					{
+						img2 = reduceBrightness(img2);
+
+						cv::imshow("original LEFT", img1);
+						cv::imshow("original RIGHT", img2);
+
+
+						
+
+						// 1) Undistort Images.
+						cv::Mat undistorted_img1,undistorted_img2;
+						cv::undistort(img1, undistorted_img1, cameraMatrix1, distCoeffs1);
+						cv::undistort(img2, undistorted_img2, cameraMatrix2, distCoeffs2);
+
+						// 2) Rectify them
+
 						cv::Mat rectified_img1, cimg1;
 
 						// The remap function works as follows - where (x,y) is a pixel coordinate
 						// dest(x,y) = src(rmap[0][0]*(x,y), rmap[0][1]*(x,y)) ??!
 						// if rmap[0][0/1]*(x,y) results in non-integer coordinates, then pixel value is interpolated(bilinear).
-						remap(img1, rectified_img1, rmap[0][0], rmap[0][1], INTER_LINEAR);
-						cvtColor(rectified_img1, cimg1, COLOR_GRAY2BGR); // done so that lines (see below) can be displayed in colour
+						cv::remap(img1, rectified_img1, rmap[0][0], rmap[0][1], INTER_LINEAR);
+						 // done so that lines (see below) can be displayed in colour
+						//cv::cvtColor(rectified_img1, cimg1, COLOR_GRAY2BGR);
 						cv::Mat canvasPart1 = !isVerticalStereo ? canvas(Rect(0, 0, w, h)) : canvas(Rect(0, 0, w, h));
-						resize(cimg1, canvasPart1, canvasPart1.size(), 0, 0, INTER_AREA);
+						cv::resize(rectified_img1, canvasPart1, canvasPart1.size(), 0, 0, INTER_AREA);
 
-				
 						cv::Mat rectified_img2, cimg2;
 
-						remap(img2, rectified_img2, rmap[1][0], rmap[1][1], INTER_LINEAR);
-						cvtColor(rectified_img2, cimg2, COLOR_GRAY2BGR);
+						cv::remap(img2, rectified_img2, rmap[1][0], rmap[1][1], INTER_LINEAR);
+						//cv::cvtColor(rectified_img2, cimg2, COLOR_GRAY2BGR);
 						cv::Mat canvasPart2 = !isVerticalStereo ? canvas(Rect(w, 0, w, h)) : canvas(Rect(0, h, w, h));
-						resize(cimg2, canvasPart2, canvasPart2.size(), 0, 0, INTER_AREA);
+						resize(rectified_img2, canvasPart2, canvasPart2.size(), 0, 0, INTER_AREA);
 
-		
-						//===== Undistort corner coordinates ======
-
-						// why don't I have to rectify these ?
-						std::vector< Point2f > undistortedCorners1, undistortedCorners2;
-						cv::undistortPoints(left_img_points[i],undistortedCorners1,cameraMatrix1,distCoeffs1,R1,P1);
-						cv::undistortPoints(right_img_points[i],undistortedCorners2,cameraMatrix2,distCoeffs2,R2,P2);
-
-						//===== Compute and Display Epipolar lines ======
-						std::cerr << "Displaying epipolar lines...\n";
-
-						// Remember epipolar lines are simply [a,b,c] in homogenous coordinates.
-						std::vector<Vec3f> epilines1,epilines2;
-						cv::computeCorrespondEpilines(undistortedCorners1, 1, F, epilines1); //Index starts with 1
-						cv::computeCorrespondEpilines(undistortedCorners2, 2, F, epilines2);
-
-				
-						// select random color from [0,256)
-						cv::Scalar line_color(rng(256),rng(256),rng(256));
-				
-						// For some of the detected points in a pair of images, display epipolar lines.
-						for(int i = 0 , len = undistortedCorners1.size() ; i < len ; i+=len/8)
+						
+						/*
+						//===== corners ======
+						bool foundBoth = this->findCorrespondingFeaturesBothImages(rectified_img1, rectified_img2, observedCorners1, observedCorners2, true, true);
+						
+						if(foundBoth)
 						{
-							// To draw a line, specify 2 end points.
-							// The 2 end points below are obtained by simply substituting x = 0 and x = img1/2.cols.
-							// in ax+by+c=0 and then obtaining corresponding y.
-							cv::line(canvasPart1,cv::Point(0,-epilines2[i][2]/epilines2[i][1]),
-										cv::Point(img1.cols,-(epilines2[i][2]+epilines2[i][0]*img1.cols)/epilines2[i][1]),line_color);
+							//===== Compute and Display Epipolar lines ======
+						
+							// Remember epipolar lines are simply [a,b,c] in homogenous coordinates.
+							std::vector<Vec3f> epilines1,epilines2;
+							cv::computeCorrespondEpilines(observedCorners1, 1, F, epilines1); //Index starts with 1
+							cv::computeCorrespondEpilines(observedCorners2, 2, F, epilines2);
 
-							cv::line(canvasPart2,cv::Point(0,-epilines1[i][2]/epilines1[i][1]),
-										cv::Point(img2.cols,-(epilines1[i][2]+epilines1[i][0]*img2.cols)/epilines1[i][1]),line_color);
-			
-							// To check if epipolar lines are passing through (corresponding) points, display points on image as well.
-							cv::circle(canvasPart1, undistortedCorners1[i], 3, line_color, -1, CV_AA);
-							cv::circle(canvasPart2, undistortedCorners2[i], 3, line_color, -1, CV_AA);
+					
+							// select random color from [0,256)
+							cv::Scalar line_color(rng(256),rng(256),rng(256));
+					
+							// For some of the detected points in a pair of images, display epipolar lines.
+							for(int i = 0 , len = observedCorners1.size() ; i < len ; i+=1)
+							{
+								// To draw a line, specify 2 end points.
+								// The 2 end points below are obtained by simply substituting x = 0 and x = img1/2.cols.
+								// in ax+by+c=0 and then obtaining corresponding y.
+								cv::line(canvasPart1,cv::Point(0,-epilines2[i][2]/epilines2[i][1]),
+											cv::Point(rectified_img1.cols,-(epilines2[i][2]+epilines2[i][0]*rectified_img1.cols)/epilines2[i][1]),line_color);
 
-						}
+								cv::line(canvasPart2,cv::Point(0,-epilines1[i][2]/epilines1[i][1]),
+											cv::Point(rectified_img2.cols,-(epilines1[i][2]+epilines1[i][0]*rectified_img2.cols)/epilines1[i][1]),line_color);
 				
+								// To check if epipolar lines are passing through (corresponding) points, display points on image as well.
+								cv::circle(canvasPart1, observedCorners1[i], 3, line_color, -1, CV_AA);
+								cv::circle(canvasPart2, observedCorners2[i], 3, line_color, -1, CV_AA);
+
+							}
+						}
+						*/
+
+						if( !isVerticalStereo )
+						{
+			            	for( int j = 0; j < canvas.rows; j += 16 )
+			                	line(canvas, Point(0, j), Point(canvas.cols, j), Scalar(0, 255, 0), 1, 8);
+						}
+
+			        	else
+			        	{
+			            	for( int j = 0; j < canvas.cols; j += 16 )
+			                	line(canvas, Point(j, 0), Point(j, canvas.rows), Scalar(0, 255, 0), 1, 8);
+			        	}
+									
+					
+
+			        }
+
+					else
+					{ 
+						std::cerr << "One of the iamge pairs is empty ! " <<  "\n"; 
+					}
+
+					
+					cv::imshow("rectified", canvas);
+
+					char c = (char)waitKey(0);
+					if( c == esc_ascii || c == 'q' || c == 'Q' )
+					{
+						break;
+					}
+
+					// save images 
+					
+						cv::imwrite("rectified_images.png",canvas);
+					
 
 				}
 
+				
+			}
 
-				else
-				{ 
-					std::cerr << "One of the iamge pairs is empty ! for i =" << i <<  "\n"; 
-				}
+			cv::destroyAllWindows();
 
-		
-				cv::imshow("rectified", canvas);
 
-				char c = (char)waitKey();
-				if( c == esc_ascii || c == 'q' || c == 'Q' )
-				{
-					 break;
-				}
 		}
-
-		cv::destroyAllWindows();
-
-
 	}
 	
 }
@@ -805,28 +884,22 @@ int StereoCamera::rectifyImages(bool display/*=false*/)
 
 
 
-
 // ================== Stereo Correspondence using SURF + Flann Matcher ==========
 
-bool StereoCamera::findCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2,vector< Point2f >& observedCorners1,vector< Point2f >& observedCorners2,bool corner_refine/*=true*/, bool display/*=false*/)
+bool StereoCamera::findCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2, std::vector< Point2f >& observedCorners1, std::vector< Point2f >& observedCorners2, bool corner_refine/*=true*/, bool display/*=false*/)
 {
+	std::string matches_window_name = "Good Matches";
+	cv::namedWindow(matches_window_name, cv::WINDOW_NORMAL);
+	
+	//cv::moveWindow(matches_window_name, 400,300);
+	//cv::resizeWindow(matches_window_name,800,400);
 
 	bool foundBoth = false; 
-
-	/* If finding chess board corners in images.
-		bool found1 = cv::findChessboardCorners(img1, chessBoardDimension, observedCorners1,
-		CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
-		bool found2 = cv::findChessboardCorners(img2, chessBoardDimension, observedCorners2,
-		CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
-
-		foundBoth = found1 && found2;
-	*/
-	
 
 	//-- Step 1: Feature Detector + Descriptor ( SURF )
 	// only features whose hessian is larger than threshold are accepted.
 	// increase this if you want fewer detected keypoints.
-	int minHessian = 400;
+	int minHessian = 300 ;
 	Ptr<cv::xfeatures2d::SURF> detector = cv::xfeatures2d::SURF::create();
 	detector->setHessianThreshold(minHessian);
 
@@ -850,11 +923,9 @@ bool StereoCamera::findCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2
 		matcher.match( descriptors_1, descriptors_2, matches );
 	
 	
-	
-
 		double max_dist = 0; double min_dist = 100;
 		//-- Quick calculation of max and min distances between keypoints
-		for( int i = 0; i < descriptors_1.rows; i++ )
+		for( int i = 0; i < descriptors_1.rows; ++i )
 		{ double dist = matches[i].distance;
 			if( dist < min_dist ) min_dist = dist;
 			if( dist > max_dist ) max_dist = dist;
@@ -895,24 +966,19 @@ bool StereoCamera::findCorrespondingFeaturesBothImages(cv::Mat img1,cv::Mat img2
 			cv::cornerSubPix(gray2, observedCorners2, cv::Size(5, 5), cv::Size(-1, -1),
 			cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
 				
-			//std::cerr << "finished refining ..." << "\n";
+			
 		}
 
 		if(display)
 		{
+			std::cerr << "Now displaying ..." << "\n";
 			cv::Mat img_matches;
 			drawMatches( img1, keypoints_1, img2, keypoints_2,
 				   good_matches, img_matches, Scalar::all(-1), Scalar::all(-1),
 				   vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
 			//-- Show detected matches
-			cv::imshow( "Good Matches", img_matches );
+			cv::imshow( matches_window_name, img_matches );
 		
-			/*
-				// Size(5,5) is recommended (by docs) neighbourhood size used in corner refinement algorithm.
-				// It is in-place, observedCorners1 is input and output.
-				cv::drawChessboardCorners(img1, chessBoardDimension, observedCorners1, found1);
-				cv::drawChessboardCorners(img2, chessBoardDimension, observedCorners2, found2);
-			*/
 		}
 
 		foundBoth = !good_matches.empty();
@@ -944,13 +1010,13 @@ cv::Mat StereoCamera::doTriangulate_SingleFrame(cv::Mat img1, cv::Mat img2, bool
 	cv::Mat P2 = this->P2;
 	
 
-	 // For each image, find corresponding features, undistort corners and then triangulate
+	 // For each image, find corresponding features, undistort the found features and then triangulate
 	 std::vector< Point2f > observedCorners1, observedCorners2, undistortedCorners1, undistortedCorners2;
 
 		
-		bool foundBoth = this->findCorrespondingFeaturesBothImages(img1,img2,observedCorners1,observedCorners2,true,true);
+	bool foundBoth = this->findCorrespondingFeaturesBothImages(img1,img2,observedCorners1,observedCorners2,true,true);
 		
-		if(foundBoth) 
+		if(foundBoth && !observedCorners1.empty() && !observedCorners2.empty()  ) 
 		{
 			//========== Undistort and triangulate ============
 
@@ -985,11 +1051,11 @@ cv::Mat StereoCamera::doTriangulate_SingleFrame(cv::Mat img1, cv::Mat img2, bool
 			if(display)
 			{
 				// Display (x,y,z) coordinates on the image(s)
+				// Should I undistort image and display coordinates on undistorted image ?
 				for(unsigned i=0, len = observedCorners1.size(); i < len ; i+=1)
 				{
 					ss << "( " << pnts3D.at<float>(i,0) <<" , " << pnts3D.at<float>(i,1) << " , " << pnts3D.at<float>(i,2) <<" )" ;
 				
-					//cout << "(x,y,z) =" << pnts3D.col(i) << "\n";
 					cv::circle(img1, observedCorners1[i], 3, GREEN, -1, CV_AA);
 					cv::putText(img1,ss.str(),observedCorners1[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, RED);
 					//cv::putText(img2,ss.str(),observedCorners2[i], cv::FONT_HERSHEY_SIMPLEX, FONT_SIZE, RED);
@@ -1017,18 +1083,15 @@ cv::Mat StereoCamera::doTriangulate_SingleFrame(cv::Mat img1, cv::Mat img2, bool
 
 
 
-
-
 // Input - Main Inputs are extrinsic parameters of a stereo camera setup. 
 // Note - the extrinsic are only valid for a particular stereo camera setup
 // 		  and hence If the cameras' relative orientation changes, then the extrinsics
 // 		  will change too and hence new extrinsics will need to be found before triangulation.
-
 int StereoCamera::doTriangulate()
 {
 	std::stringstream ss;  // used during display.
 
-	std::cerr << "Assuming stereo Rectification has been done ...\n";
+	std::cerr << "Assuming stereo Rectification has been (since P1, R1 ,etc are required..) ...\n";
 	std::cerr << "Reading Intrinsics and Extrinsic parameters of stereo camera setup ...\n";
 		
 	// needed for undistorting and triangulting feature points.
@@ -1046,14 +1109,15 @@ int StereoCamera::doTriangulate()
 	cv::VideoCapture vid1(this->left_camera.id);
 	cv::VideoCapture vid2(this->right_camera.id);
 	
-	// For range-based HSV thresholding later.
-	int h_min = 0 , h_max = 9 ;
-	int s_min = 207, s_max = 255;
-	int v_min = 24 , v_max = 236;
-	
-	int h_min2 = 0 , h_max2 = 216 ;
-	int s_min2 = 143, s_max2 = 255;
-	int v_min2 = 218 , v_max2 = 255;
+	std::string left_camera_window = "Triangle - Left camera view";
+	std::string right_camera_window = "Triangle - Right camera view";
+
+	cv::namedWindow(left_camera_window);
+	cv::namedWindow(right_camera_window);
+	cv::moveWindow(left_camera_window, 20,20);
+	cv::moveWindow(right_camera_window, 700,20);
+	//cv::resizeWindow(left_camera_window, 500,500);
+	//cv::resizeWindow(right_camera_window, 500,500);
 
 	if(vid1.isOpened() && vid2.isOpened() )
 	{
@@ -1063,33 +1127,16 @@ int StereoCamera::doTriangulate()
 			cv::Mat img1,img2;
 			vector< Point2f > observedCorners1, observedCorners2, undistortedCorners1, undistortedCorners2;
 
+			img2 = reduceBrightness(img2);
+
 			if(!vid1.read(img1) || !vid2.read(img2) )
 			{	
 				std::cerr << "Can't read images from either of the cameras !!\n";
 				break;
 			}
-	
-			int convertToHSV = 0;
-			// convert to HSV ?
-			if(convertToHSV)
-			{
-					cv::Mat hsv_frame1, hsv_frame2;
-					cv::cvtColor(img1,hsv_frame1,CV_BGR2HSV);
-					cv::cvtColor(img2,hsv_frame2,CV_BGR2HSV);
 			
-		
-					// range-based thresholding - output is binary image, but 8-bit.
-					cv::inRange(hsv_frame1,Scalar(h_min,s_min,v_min),Scalar(h_max,s_max,v_max),hsv_frame1);
-					cv::inRange(hsv_frame2,Scalar(h_min2,s_min2,v_min2),Scalar(h_max2,s_max2,v_max2),hsv_frame2);
-				
-					// Convert it back to color  for feature detection ?
-					cv::cvtColor(hsv_frame1, img1, CV_GRAY2BGR); 
-					cv::cvtColor(hsv_frame2, img2, CV_GRAY2BGR); 
+			//Rectify and undistorted images.
 
-					std::cerr << "Converted image to HSV.... !!" << "\n";
-			}
-
-			
 			bool foundBoth = this->findCorrespondingFeaturesBothImages(img1,img2,observedCorners1,observedCorners2,true,true);
 			
 			if(foundBoth) 
@@ -1123,12 +1170,24 @@ int StereoCamera::doTriangulate()
 				//convert output to 3D cartesian coordinates (x,y,z)
 				cv::Mat pnts3D(1,undistortedCorners1.size(),CV_64FC3);
 				cv::convertPointsFromHomogeneous(multiChannelMat,pnts3D);
-					
-		
+				
+				/*	
+				// since y-axis is inverted.
+				int rows = pnts3D.rows;
+				int cols = pnts3D.cols;
+				for(int y = 0 ; y < rows; ++y)
+				{
+					for(int x = 0 ;x < cols ; ++x)
+					{
+						pnts3D.at<Vec3b>(y, x)[1] = -1 * pnts3D.at<Vec3b>(y, x)[1] ;
+					}				}
+				}
+				*/
+
 				// Display (x,y,z) coordinates on the image(s)
 				for(unsigned i=0, len = observedCorners1.size(); i < len ; i+=1)
 				{
-					ss << "( " << pnts3D.at<float>(i,0) <<" , " << pnts3D.at<float>(i,1) << " , " << pnts3D.at<float>(i,2) <<" )" ;
+					ss << "( " << pnts3D.at<float>(i,0) <<" , " << -1*pnts3D.at<float>(i,1) << " , " << pnts3D.at<float>(i,2) <<" )" ;
 					
 					//cout << "(x,y,z) =" << pnts3D.col(i) << "\n";
 					cv::circle(img1, observedCorners1[i], 3, GREEN, -1, CV_AA);
@@ -1139,8 +1198,6 @@ int StereoCamera::doTriangulate()
 					ss.str(""); //clear the stringstream buffer
 				}
 				
-				
-
 			}
 	
 			else
@@ -1148,14 +1205,19 @@ int StereoCamera::doTriangulate()
 				std::cerr << "No corresponding features found!\n";
 			}
 
-			cv::imshow("Triangle - Left camera view", img1);
-			cv::imshow("Triangle - Right camera view", img2);
+			cv::imshow(left_camera_window, img1);
+			cv::imshow(right_camera_window, img2);
 
-			char key = (char)waitKey(0);
+			char key = (char)waitKey(20);
 		
 			if(key == 'q' || key == esc_ascii)
 			{
 				break;
+			}
+
+			else if(key == 's')
+			{
+				cv::imwrite("Triangulation.jpg",img1);
 			}
 	
 		}
@@ -1167,7 +1229,7 @@ int StereoCamera::doTriangulate()
 
 	else
 	{
-		std::cerr << "Can't open video device input Can't triangulate,...";
+		std::cerr << "Can't open video device input Can't triangulate!!\n";
 	}
 
 	
@@ -1182,20 +1244,10 @@ int StereoCamera::doTriangulate()
 
 
 
+
+
+
 /*
-enum { STEREO_BM=0, STEREO_SGBM=1, STEREO_HH=2, STEREO_VAR=3, STEREO_3WAY=4 };
-// variables needed by trackbar
-int algVal                 = STEREO_SGBM;
-int SADWindowSizeVal       = algVal == STEREO_SGBM ? 3 : 9;
-int preFilterCapVal        = 63;
-int minDisparityVal        = 0 ; 
-int numberOfDisparitiesVal = 16;
-int uniquenessRatioVal     = 10;
-int speckleWindowSizeVal   = 100;
-int setSpeckleRangeVal     = 32;
-
-
-
 
 // usage
 // string ty =  type2str( M.type() );
@@ -1223,30 +1275,24 @@ string type2str(int type) {
   return r;
 }
 
+*/
 
 
 
 
 
-//======================= Disparity Section ============================================
+
+
+
+
+
+//======================= Disparity Section ==========================================
 
 
 
 int checkParameters(const std::string& img1_filename, const std::string& img2_filename,const std::string& intrinsic_filename,const std::string& extrinsic_filename,const std::string& point_cloud_filename)
 {
-	if ( numberOfDisparitiesVal < 1 || numberOfDisparitiesVal % 16 != 0 )
-    {
-        printf("Function parameter error: The max disparity (--maxdisparity=<...>) must be a positive integer divisible by 16\n");
-        return -1;
-    }
-
-   
-    if (SADWindowSizeVal < 1 || SADWindowSizeVal % 2 != 1)
-    {
-        printf("The block size (--blocksize=<...>) must be a positive odd number\n");
-        return -1;
-    }
-
+	
     if( img1_filename.empty() || img2_filename.empty() )
     {
         printf("Function parameter error: both left and right images must be specified\n");
@@ -1269,6 +1315,24 @@ int checkParameters(const std::string& img1_filename, const std::string& img2_fi
 }
 
 
+
+enum { STEREO_BM=0, STEREO_SGBM=1, STEREO_HH=2, STEREO_VAR=3, STEREO_3WAY=4 };
+// variables needed by trackbar
+// values assigned here are default values.
+int algVal                 = STEREO_SGBM;
+int SADWindowSizeVal       = algVal == STEREO_SGBM ? 3 : 9; // block dimensions (must be odd) 3-11 range.
+int preFilterCapVal        = 63;
+int minDisparityVal        = 0 ; 
+int numberOfDisparitiesVal = 1;
+int uniquenessRatioVal     = 10; // 5-15%
+int speckleWindowSizeVal   = 100; // 50-200
+int setSpeckleRangeVal     = 32;  // 1 or 2
+int P1Val 				   = 0;
+int P2Val 				   = 0;
+
+
+
+
 //enum { STEREO_BM=0, STEREO_SGBM=1, STEREO_HH=2, STEREO_VAR=3, STEREO_3WAY=4 };
 // from $OPENCV_DIR/samples/cpp/stereo_match.cpp
 int findDisparityAndDepth(const std::string& img1_filename, const std::string& img2_filename,
@@ -1282,9 +1346,12 @@ int findDisparityAndDepth(const std::string& img1_filename, const std::string& i
 	
 	
 	if( checkParameters(img1_filename,img2_filename,intrinsic_filename ,extrinsic_filename, pointcloud_filename) == -1)
-	{return -1;}
+	{
+		return -1;
+	}
 
 
+	// Stereo_BM only accepts grayscale images.
     int color_mode = algVal == STEREO_BM ? 0 : -1;
     Mat img1 = imread(img1_filename, color_mode);
     Mat img2 = imread(img2_filename, color_mode);
@@ -1355,29 +1422,52 @@ int findDisparityAndDepth(const std::string& img1_filename, const std::string& i
         img1 = img1r;
         img2 = img2r;
     }
-
+   
+  
 
 	// variables needed by trackbar
 	
 	sgbm->setPreFilterCap(preFilterCapVal);
-	int sgbmWinSize = SADWindowSizeVal;
+	int sgbmWinSize = (SADWindowSizeVal * 2) - 1;
+	if (sgbmWinSize < 1 || sgbmWinSize % 2 != 1)
+    {
+        printf("The block size (--blocksize=<...>) must be a positive odd number\n");
+        return -1;
+    }
+
     sgbm->setBlockSize(SADWindowSizeVal);
 
     int cn = img1.channels();
-    sgbm->setP1(8*cn*sgbmWinSize*sgbmWinSize);
-    sgbm->setP2(32*cn*sgbmWinSize*sgbmWinSize);
+    //sgbm->setP1(8*cn*sgbmWinSize*sgbmWinSize);
+    //sgbm->setP2(32*cn*sgbmWinSize*sgbmWinSize);
+    //sgbm->setMinDisparity(minDisparityVal);
 
+
+    sgbm->setP1(P1Val);
+    sgbm->setP2(P2Val);
+
+    //minDisparityVal = minDisparityVal -50;
     sgbm->setMinDisparity(minDisparityVal);
+
+    int numberOfDisparitiesVal = 16* (numberOfDisparitiesVal+1);
+    if ( numberOfDisparitiesVal < 1 || numberOfDisparitiesVal % 16 != 0 )
+    {
+        printf("Function parameter error: The max disparity (--maxdisparity=<...>) must be a positive integer divisible by 16\n");
+        return -1;
+    }
+
     sgbm->setNumDisparities(numberOfDisparitiesVal);
     sgbm->setUniquenessRatio(uniquenessRatioVal);
     sgbm->setSpeckleWindowSize(speckleWindowSizeVal);
     sgbm->setSpeckleRange(setSpeckleRangeVal);
     sgbm->setDisp12MaxDiff(1);
-    if(algVal==STEREO_HH)
-        sgbm->setMode(StereoSGBM::MODE_HH);
-    else if(algVal==STEREO_SGBM)
+
+   
+    if(algVal==1)
         sgbm->setMode(StereoSGBM::MODE_SGBM);
-    else if(algVal==STEREO_3WAY)
+    else if(algVal==2)
+    	sgbm->setMode(StereoSGBM::MODE_HH);
+    else if(algVal==3)
         sgbm->setMode(StereoSGBM::MODE_SGBM_3WAY);
 
 
@@ -1388,7 +1478,7 @@ int findDisparityAndDepth(const std::string& img1_filename, const std::string& i
    
     	sgbm->compute(img1, img2, disp);
     t = getTickCount() - t;
-    fprintf(stderr,"Time elapsed: %fms\n", t*1000/getTickFrequency());
+    //fprintf(stderr,"Time elapsed: %fms\n", t*1000/getTickFrequency());
 	
 	disp.convertTo(disp8, CV_8U);
 
@@ -1399,6 +1489,8 @@ int findDisparityAndDepth(const std::string& img1_filename, const std::string& i
     imshow("right", img2);
     namedWindow("disparity", 0);
     imshow("disparity", disp8);
+    char ch =waitKey(200);
+    /*
     fprintf(stderr,"Please re-tune parameters if needed and/or press a key to continue ...\n");
     char ch =waitKey(0);
 	if(ch == 'q')
@@ -1406,45 +1498,51 @@ int findDisparityAndDepth(const std::string& img1_filename, const std::string& i
 		return -1;
 	}
     printf("\n");
+	*/
 
+	/*
 
-	//if(!disparity_file.empty()) { imwrite(disparity_file, disp8); }
+	if(!disparity_file.empty()) 
+	{
+		cv::imwrite(disparity_file, disp8); 
+	}
 
-	
+	if(!point_cloud_filename.empty())
+    {
+        printf("storing the point cloud...");
+        fflush(stdout);
+        Mat xyz;
+        cv::reprojectImageTo3D(disp, xyz, Q, true);
+        saveXYZ(point_cloud_filename.c_str(), xyz);
+        printf("\n");
+    }
+
+	*/
+
+    return 0;
+
 }
 
-
-
-/*
-enum { STEREO_BM=0, STEREO_SGBM=1, STEREO_HH=2, STEREO_VAR=3, STEREO_3WAY=4 };
-// variables needed by trackbar
-int algVal                 = STEREO_SGBM;
-int SADWindowSizeVal       = algVal == STEREO_SGBM ? 3 : 9;
-int preFilterCapVal        = 63;
-int minDisparityVal        = 0 ; 
-int numberOfDisparitiesVal = 16;
-int uniquenessRatioVal     = 10; // 5-15%
-int speckleWindowSizeVal   = 100; // 50-200
-int setSpeckleRangeVal     = 32;  // 1 or 2
 
 
 void createStereoTrackBars(const char* trackBarWindowName) 
 {
 
 	createTrackbar("alg",trackBarWindowName,&algVal,4,0);
-	createTrackbar("SADWindowSize(odd)",trackBarWindowName,&SADWindowSizeVal,15,0) ;
+	createTrackbar("SADWindowSize (convereted to odd)",trackBarWindowName,&SADWindowSizeVal,15,0) ;
 	createTrackbar("preFilterCap",trackBarWindowName,&preFilterCapVal,100,0) ;
-	createTrackbar("minDisparity",trackBarWindowName,&minDisparityVal,20,0) ;
-	createTrackbar("numberOfDisparities(%16=0)",trackBarWindowName,&numberOfDisparitiesVal,160,0) ;
-	createTrackbar("uniquenessRatio(5-15)",trackBarWindowName,&uniquenessRatioVal,16,0) ;
+	createTrackbar("minDisparity (-50)",trackBarWindowName,&minDisparityVal,120,0) ;
+	createTrackbar("numberOfDisparities( (n+1)*16 )",trackBarWindowName,&numberOfDisparitiesVal,12,0) ;
+	createTrackbar("uniquenessRatio(5 to 15)",trackBarWindowName,&uniquenessRatioVal,16,0) ;
 	createTrackbar("speckleWindowSize(50-200)",trackBarWindowName,&speckleWindowSizeVal,200,0) ;
 	createTrackbar("setSpeckleRange",trackBarWindowName,&setSpeckleRangeVal,5,0) ;
-
+	createTrackbar("P1",trackBarWindowName,&P1Val,800,0) ;
+	createTrackbar("P2 (>P1)",trackBarWindowName,&P2Val,3000,0) ;
 }
 
 
 
-void doDisparity(const char* intrinsics_file,const char* extrinsics_file)
+void StereoCamera::doDisparity(const char* intrinsics_file,const char* extrinsics_file)
 {
 	std::string pointcloud_file = "point_cloud.txt"; 
 	std::string disparity_file = "disparity_img.jpg";
@@ -1471,7 +1569,7 @@ void doDisparity(const char* intrinsics_file,const char* extrinsics_file)
 
 				numberOfDisparitiesVal = ((left_img.size().width/8) + 15) & -16;
 				
-				if(findDisparityAndDepth(left_img_file, right_img_file,intrinsics_file,extrinsics_file,
+				if(findDisparityAndDepth(left_img_file, right_img_file, intrinsics_file, extrinsics_file,
 									disparity_file,pointcloud_file) == -1 )
 				{
 					break;		
@@ -1483,7 +1581,4 @@ void doDisparity(const char* intrinsics_file,const char* extrinsics_file)
 	}
 
 }
-*/
-
-
 
